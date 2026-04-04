@@ -11,7 +11,7 @@ const TILE = 32;
 const COLS = 25;
 const ROWS = 18;
 
-let gameState = 'title'; // title, prologue, overworld, dialogue, battle, battleIntro, victory, diploma, mapTransition, doorOpening, libraryEntrance
+let gameState = 'title'; // title, prologue, overworld, dialogue, battle, battleIntro, victory, diploma, mapTransition, doorOpening, libraryEntrance, artifactPopup
 let keys = {};
 let frameCount = 0;
 let playerData = {
@@ -31,7 +31,9 @@ let playerData = {
     inventory: [],
     currentMap: 'aksum',
     name: 'Young Scholar',
-    hasScroll: false
+    hasScroll: false,
+    visitedArtifacts: [],
+    talkedToNpcs: []
 };
 
 let currentDialogue = null;
@@ -67,6 +69,9 @@ let diplomaPhase = 0;
 let doorOpenTimer = 0;
 let doorOpenPhase = 0; // 0=luther speaks, 1=doors opening, 2=walk through
 
+// Artifact popup state
+let activeArtifact = null;
+
 // Codex/Index state
 let codexOpen = false;
 let codexScroll = 0;
@@ -93,6 +98,82 @@ const codexStory = [
     { title: 'WHY IT MATTERS', text: 'Ethiopia did not copy Luther -- Luther\'s ideas were validated BY Ethiopia. The Ethiopian Church proved that Christianity could thrive for 1,000+ years without a Pope, without indulgences, and without forced celibacy.' },
     { title: 'THE MEETING OF 1534', text: 'Michael the Deacon traveled from Ethiopia to Wittenberg and met Luther in person. Luther gave him full communion -- an honor he denied to many other groups -- recognizing Ethiopia as true Christianity.' }
 ];
+
+// Artifact data per region
+const artifacts = {
+    aksum: [
+        {
+            id: 'artifact_monks',
+            x: 9, y: 8,
+            title: 'Ethiopian Orthodox Monks',
+            description: 'Ethiopian monks have kept the faith alive since the 4th century, preserving sacred texts and traditions in remote monasteries across the highlands.',
+            imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/Ethiopian_Orthodox_Monks%2C_Jerusalem.jpg/320px-Ethiopian_Orthodox_Monks%2C_Jerusalem.jpg'
+        },
+        {
+            id: 'artifact_geez',
+            x: 15, y: 8,
+            title: 'Ge\'ez Bible Manuscript',
+            description: 'The Ethiopian Bible was written in Ge\'ez -- the sacred language of the people. While Europe read Scripture only in Latin, Ethiopians could understand their own Bible for over a thousand years.',
+            imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/2e/Ethiopian_Manuscript_Binding.jpg/320px-Ethiopian_Manuscript_Binding.jpg'
+        },
+        {
+            id: 'artifact_meskel',
+            x: 7, y: 10,
+            title: 'Meskel -- Festival of the True Cross',
+            description: 'Meskel is a major Ethiopian Orthodox festival celebrating the finding of the True Cross. Bonfires are lit and thousands gather -- a tradition stretching back over 1,600 years.',
+            imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b1/Meskel_Demera.jpg/320px-Meskel_Demera.jpg'
+        }
+    ],
+    lalibela: [
+        {
+            id: 'artifact_beta_giorgis',
+            x: 8, y: 9,
+            title: 'Beta Giorgis -- Church of St. George',
+            description: 'The most famous of Lalibela\'s rock-hewn churches, carved in the shape of a perfect cross. It was chiseled straight DOWN into solid rock in the 12th century -- an engineering marvel.',
+            imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/Bete_Giyorgis_03.jpg/320px-Bete_Giyorgis_03.jpg'
+        },
+        {
+            id: 'artifact_illuminated',
+            x: 16, y: 9,
+            title: 'Ethiopian Illuminated Manuscript',
+            description: 'Ethiopian scribes created stunning illuminated manuscripts with vivid colors and unique artistic styles, blending African and Christian imagery in ways found nowhere else in the world.',
+            imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/Gunda_Gunde_Gospels%2C_Walters_Art_Museum_Ms._W.850%2C_fol._14v.jpg/320px-Gunda_Gunde_Gospels%2C_Walters_Art_Museum_Ms._W.850%2C_fol._14v.jpg'
+        }
+    ],
+    wittenberg: [
+        {
+            id: 'artifact_theses_door',
+            x: 12, y: 7,
+            title: 'The 95 Theses Door',
+            description: 'On October 31, 1517, Martin Luther nailed his 95 Theses to the door of the Castle Church in Wittenberg. This single act of protest against indulgences sparked the Protestant Reformation.',
+            imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/63/Wittenberg_Schlosskirche_Thesentuer.jpg/320px-Wittenberg_Schlosskirche_Thesentuer.jpg'
+        },
+        {
+            id: 'artifact_press',
+            x: 8, y: 9,
+            title: 'The Printing Press',
+            description: 'Gutenberg\'s printing press (invented c. 1440) allowed Luther\'s ideas to spread like wildfire. Without it, the Reformation might never have reached beyond Wittenberg.',
+            imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/PrintMus_038.jpg/320px-PrintMus_038.jpg'
+        }
+    ]
+};
+
+// Image cache and preloader for artifacts
+const imageCache = {};
+
+function preloadArtifactImages() {
+    Object.values(artifacts).forEach(regionArtifacts => {
+        regionArtifacts.forEach(art => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => { imageCache[art.id] = img; };
+            img.onerror = () => { imageCache[art.id] = null; };
+            img.src = art.imageUrl;
+        });
+    });
+}
+
+preloadArtifactImages();
 
 // NPC walk sequence state
 let npcWalkSequence = null; // { npc, steps: [{x,y}], stepIndex, moveProgress, callback, dialogueAfter }
@@ -352,11 +433,10 @@ const maps = {
                     'In our Ethiopian Church, priests are allowed to marry. We see marriage as a BLESSING, not a barrier to serving God.',
                     'But in the Catholic Church of Europe? Priests are forbidden from marrying! They call it "celibacy."',
                     'Luther believes this rule is unnatural and harmful. He argues that clergy should be free to marry.',
-                    'When he makes this argument, he is asking for something we Ethiopians have practiced for centuries!',
+                    'When he makes this argument, he is asking for something we Ethiopian Christians have practiced for centuries!',
                     'Also --when we celebrate communion, ALL believers receive both the bread AND the wine.',
                     'In the Roman Catholic Church, only priests get the wine! Regular people only receive bread. Luther calls this deeply wrong.'
-                ],
-                quiz: true
+                ]
             },
             {
                 id: 'scholar_yohannes',
@@ -374,21 +454,12 @@ const maps = {
                 ]
             },
             {
-                id: 'guard_aksum',
+                id: 'spirit_aksum',
                 x: 22, y: 9,
                 dir: 'down',
-                colors: { body: '#6a5a3a', skin: '#6f4e37', hair: '#1a1a1a', legs: '#4a3a2a', shoes: '#3a2a1a' },
-                name: 'Captain Dawit',
-                dialogue: playerData.hasScroll ? [
-                    'You carry the sacred scroll? Then you may pass to Lalibela.',
-                    'But first, you must prove you have learned from the monks here.',
-                    'Defeat the Guardian Spirit in a quiz battle to earn passage!'
-                ] : [
-                    'The road south to Lalibela is dangerous, young scholar.',
-                    'Speak to Elder Abba Salama first --he has been asking for you.',
-                    'And learn from our monks before you attempt the journey!'
-                ],
-                blocks: 'lalibela'
+                isSpirit: true,
+                colors: { body: 'rgba(106,42,170,0.7)', skin: 'rgba(180,160,220,0.8)', hair: '#4a1070', legs: 'rgba(80,30,140,0.7)', shoes: 'rgba(60,20,100,0.7)' },
+                name: 'Spirit of Aksum'
             }
         ],
         warps: [
@@ -424,8 +495,7 @@ const maps = {
                         { name: 'Michael the Deacon', text: 'Our meeting will prove that a church can thrive WITHOUT a Pope, WITHOUT indulgences, WITHOUT forced celibacy!' },
                         { name: 'Michael the Deacon', text: 'Carry your scroll well, young scholar. We are both messengers of the same truth.' }
                     ]
-                },
-                quiz: true
+                }
             },
             {
                 id: 'builder',
@@ -460,6 +530,14 @@ const maps = {
                     'When Luther challenges the Pope\'s authority, he is walking a path we have walked for centuries.',
                     'Continue west to Wittenberg, young scholar. Luther needs to hear what you have learned!'
                 ]
+            },
+            {
+                id: 'spirit_lalibela',
+                x: 23, y: 9,
+                dir: 'down',
+                isSpirit: true,
+                colors: { body: 'rgba(90,60,20,0.7)', skin: 'rgba(180,160,220,0.8)', hair: '#604010', legs: 'rgba(90,60,30,0.7)', shoes: 'rgba(60,40,10,0.7)' },
+                name: 'Spirit of Lalibela'
             }
         ],
         warps: [
@@ -525,7 +603,7 @@ const maps = {
                     'I called for communion in both kinds! Scripture in the common tongue! The right of clergy to marry!',
                     'The Pope called me a HERETIC. Kings wanted me arrested. I was forced into hiding.',
                     'But then I heard whispers of the Ethiopian Church... a church that already practiced everything I was fighting for!',
-                    'When Michael the Deacon visited me here in Wittenberg, he confirmed what I had hoped:',
+                    'When the Ethiopian Michael the Deacon visited me here in Wittenberg, he confirmed what I had hoped:',
                     'Your Ethiopian Church has been "uncorrupted by the Roman papacy" for over a THOUSAND years!',
                     'Your practices of communion, vernacular Scripture, married clergy --these are not MY innovations.',
                     'They are a RETURN to how Christianity was always meant to be practiced!',
@@ -533,8 +611,15 @@ const maps = {
                     'Your church is proof that my reforms have both a biblical AND a historical basis!',
                     'Now, young scholar... let me test your knowledge. If you have truly learned on your journey, you will earn something special!'
                 ],
-                quiz: true,
                 isBoss: true
+            },
+            {
+                id: 'spirit_wittenberg',
+                x: 11, y: 5,
+                dir: 'down',
+                isSpirit: true,
+                colors: { body: 'rgba(40,60,140,0.7)', skin: 'rgba(180,160,220,0.8)', hair: '#1a2a5a', legs: 'rgba(30,40,100,0.7)', shoes: 'rgba(20,20,80,0.7)' },
+                name: 'Spirit of Wittenberg'
             }
         ],
         warps: [
@@ -1495,13 +1580,20 @@ function updateOverworld() {
             const facingX = playerData.x + (playerData.dir === 'left' ? -1 : playerData.dir === 'right' ? 1 : 0);
             const facingY = playerData.y + (playerData.dir === 'up' ? -1 : playerData.dir === 'down' ? 1 : 0);
 
+            let npcHandled = false;
             for (const npc of map.npcs) {
                 if (npc.x === facingX && npc.y === facingY) {
+                    npcHandled = true;
                     // Turn NPC to face player
                     if (playerData.dir === 'up') npc.dir = 'down';
                     else if (playerData.dir === 'down') npc.dir = 'up';
                     else if (playerData.dir === 'left') npc.dir = 'right';
                     else npc.dir = 'left';
+
+                    // Track NPC conversation
+                    if (!playerData.talkedToNpcs.includes(npc.id)) {
+                        playerData.talkedToNpcs.push(npc.id);
+                    }
 
                     // Dynamic dialogue for special NPCs
                     let dialogueLines;
@@ -1515,73 +1607,80 @@ function updateOverworld() {
                         });
                         break;
                     }
-                    if (npc.id === 'guard_aksum') {
-                        if (!playerData.hasScroll) {
-                            dialogueLines = [
-                                { name: npc.name, text: 'The road to Lalibela is dangerous, young scholar.' },
-                                { name: npc.name, text: 'Speak to Elder Abba Salama first --he has been asking for you.' },
-                                { name: npc.name, text: 'And learn from our monks before you attempt the journey!' }
-                            ];
-                            startDialogue(dialogueLines);
-                        } else {
-                            dialogueLines = [
-                                { name: npc.name, text: 'You carry the sacred scroll! Then you may attempt the passage.' },
-                                { name: npc.name, text: 'But first, prove you have learned from the monks of Aksum!' },
-                                { name: npc.name, text: 'Defeat the Guardian Spirit in battle to earn passage to Lalibela!' }
-                            ];
-                            startDialogue(dialogueLines);
-                        }
-                    } else {
-                        dialogueLines = npc.dialogue.map(text => ({ name: npc.name, text }));
 
-                        if (npc.quiz) {
-                            const quizKey = npc.isBoss ? 'quiz3' : (playerData.currentMap === 'aksum' ? 'quiz1' : 'quiz2');
-                            if (playerData.defeatedBosses.includes(quizKey)) {
-                                startDialogue([{ name: npc.name, text: npc.isBoss ? 'You have proven yourself a true scholar! Your diploma awaits in the great hall.' : 'You have already proven your knowledge here. Continue your journey, young scholar!' }]);
-                            } else {
-                                // NPCs with walk + quiz: walk first, then quiz after walk dialogue
-                                if (npc.walkAfterDialogue && !npc._hasWalked) {
-                                    const walkData = npc.walkAfterDialogue;
-                                    const quizCb = () => startBattle(quizKey);
-                                    startDialogue(dialogueLines, () => {
-                                        npc._hasWalked = true;
-                                        startNpcWalk(npc, walkData.steps, walkData.dialogue.concat([
-                                            { name: npc.name, text: 'Now --prove your knowledge in battle!' }
-                                        ]));
-                                        // After walk dialogue ends, we need to trigger quiz
-                                        npc._pendingQuiz = quizKey;
-                                    });
-                                } else if (npc._pendingQuiz) {
-                                    startBattle(npc._pendingQuiz);
-                                    npc._pendingQuiz = null;
-                                } else {
-                                    const callback = () => startBattle(quizKey);
-                                    if (npc.questGiver && npc.onComplete && !playerData.hasScroll) {
-                                        startDialogue(dialogueLines, () => { npc.onComplete(); });
-                                    } else {
-                                        startDialogue(dialogueLines, callback);
-                                    }
-                                }
-                            }
-                        } else if (npc.questGiver && npc.onComplete && !playerData.hasScroll) {
-                            startDialogue(dialogueLines, () => { npc.onComplete(); });
-                        } else if (npc.questGiver && playerData.hasScroll) {
-                            startDialogue([
-                                { name: npc.name, text: 'You carry the scroll! Now go --speak to the monks, learn all you can, then head to Lalibela!' },
-                                { name: npc.name, text: 'The knowledge you gather here will be crucial when you finally reach Martin Luther.' }
-                            ]);
-                        } else if (npc.walkAfterDialogue && !npc._hasWalked) {
-                            // Non-quiz NPCs with walks
-                            const walkData = npc.walkAfterDialogue;
-                            startDialogue(dialogueLines, () => {
-                                npc._hasWalked = true;
-                                startNpcWalk(npc, walkData.steps, walkData.dialogue);
-                            });
+                    // Spirit guide handler
+                    if (npc.isSpirit) {
+                        const region = playerData.currentMap;
+                        const quizKey = region === 'aksum' ? 'quiz1' : region === 'lalibela' ? 'quiz2' : 'quiz3';
+
+                        if (playerData.defeatedBosses.includes(quizKey)) {
+                            startDialogue([{ name: npc.name, text: 'You have already proven yourself here. Continue your journey, young scholar.' }]);
                         } else {
-                            startDialogue(dialogueLines);
+                            const comp = getRegionCompletion(region);
+                            if (comp.isComplete) {
+                                // Ready for battle
+                                const readyLines = [
+                                    { name: npc.name, text: 'You have spoken to all the people and examined every artifact in this land.' },
+                                    { name: npc.name, text: 'You are ready. Prove your knowledge in battle!' }
+                                ];
+                                startDialogue(readyLines, () => startBattle(quizKey));
+                            } else {
+                                // Show hints about what is missing
+                                const hints = [];
+                                hints.push({ name: npc.name, text: 'You are not yet ready to face me, young scholar.' });
+                                const total = comp.npcsTotal + comp.artifactsTotal + (region === 'aksum' ? 1 : 0);
+                                const done = comp.npcsDone + comp.artifactsDone + (region === 'aksum' && playerData.hasScroll ? 1 : 0);
+                                hints.push({ name: npc.name, text: 'Progress: ' + done + ' / ' + total + ' tasks complete.' });
+                                if (region === 'aksum' && !playerData.hasScroll) {
+                                    hints.push({ name: npc.name, text: 'You must obtain the Sacred Scroll from the Elder.' });
+                                }
+                                if (comp.npcsRemaining.length > 0) {
+                                    hints.push({ name: npc.name, text: 'You have not yet spoken to: ' + comp.npcsRemaining.join(', ') + '.' });
+                                }
+                                if (comp.artifactsRemaining.length > 0) {
+                                    hints.push({ name: npc.name, text: 'You have not yet examined: ' + comp.artifactsRemaining.join(', ') + '.' });
+                                }
+                                startDialogue(hints);
+                            }
                         }
+                        break;
+                    }
+
+                    // Regular NPC handling
+                    dialogueLines = npc.dialogue.map(text => ({ name: npc.name, text }));
+
+                    if (npc.questGiver && npc.onComplete && !playerData.hasScroll) {
+                        startDialogue(dialogueLines, () => { npc.onComplete(); });
+                    } else if (npc.questGiver && playerData.hasScroll) {
+                        startDialogue([
+                            { name: npc.name, text: 'You carry the scroll! Now go --speak to the monks, learn all you can, then head to Lalibela!' },
+                            { name: npc.name, text: 'The knowledge you gather here will be crucial when you finally reach Martin Luther.' }
+                        ]);
+                    } else if (npc.walkAfterDialogue && !npc._hasWalked) {
+                        const walkData = npc.walkAfterDialogue;
+                        startDialogue(dialogueLines, () => {
+                            npc._hasWalked = true;
+                            startNpcWalk(npc, walkData.steps, walkData.dialogue);
+                        });
+                    } else {
+                        startDialogue(dialogueLines);
                     }
                     break;
+                }
+            }
+
+            // Artifact interaction: check if player is standing ON an artifact tile
+            if (!npcHandled) {
+                const currentArtifacts = artifacts[playerData.currentMap] || [];
+                for (const art of currentArtifacts) {
+                    if (playerData.x === art.x && playerData.y === art.y) {
+                        if (!playerData.visitedArtifacts.includes(art.id)) {
+                            playerData.visitedArtifacts.push(art.id);
+                        }
+                        activeArtifact = art;
+                        gameState = 'artifactPopup';
+                        break;
+                    }
                 }
             }
         }
@@ -1615,6 +1714,42 @@ function drawOverworld() {
         }
     }
 
+    // Artifact markers
+    const regionArtifacts = artifacts[playerData.currentMap] || [];
+    regionArtifacts.forEach(art => {
+        const ax = art.x * TILE;
+        const ay = art.y * TILE;
+        const visited = playerData.visitedArtifacts.includes(art.id);
+        const pulse = Math.sin(frameCount * 0.06 + art.x * 2) * 0.3 + 0.7;
+
+        // Glowing pedestal base
+        ctx.fillStyle = `rgba(139, 105, 20, ${pulse * 0.5})`;
+        ctx.fillRect(ax + 4, ay + 22, 24, 10);
+        ctx.fillStyle = `rgba(139, 105, 20, ${pulse * 0.7})`;
+        ctx.fillRect(ax + 8, ay + 18, 16, 6);
+
+        // Gold glow
+        ctx.fillStyle = `rgba(255, 215, 0, ${pulse * 0.25})`;
+        ctx.beginPath();
+        ctx.arc(ax + 16, ay + 16, 14 + Math.sin(frameCount * 0.08) * 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Star/artifact symbol
+        ctx.fillStyle = `rgba(255, 215, 0, ${pulse})`;
+        ctx.fillRect(ax + 13, ay + 6, 6, 12);
+        ctx.fillRect(ax + 9, ay + 10, 14, 4);
+
+        if (visited) {
+            // Checkmark overlay (pixel drawn, not font)
+            ctx.fillStyle = '#70d070';
+            ctx.fillRect(ax + 10, ay + 2, 3, 3);
+            ctx.fillRect(ax + 13, ay + 5, 3, 3);
+            ctx.fillRect(ax + 16, ay + 2, 3, 3);
+            ctx.fillRect(ax + 19, ay - 1, 3, 3);
+            ctx.fillRect(ax + 22, ay - 4, 3, 3);
+        }
+    });
+
     // Warp indicators
     (map.warps || []).forEach(warp => {
         const wx = warp.x * TILE;
@@ -1642,14 +1777,28 @@ function drawOverworld() {
         }
 
         const bob = isWalking ? 0 : Math.sin(frameCount * 0.05 + npc.x * 3) * 2;
+
+        // Spirit NPCs render translucent with ethereal glow
+        if (npc.isSpirit) {
+            const spiritPulse = Math.sin(frameCount * 0.04) * 0.15 + 0.55;
+            ctx.globalAlpha = spiritPulse;
+            // Ethereal glow beneath
+            ctx.fillStyle = 'rgba(140, 100, 220, 0.25)';
+            ctx.beginPath();
+            ctx.arc(drawX + 16, drawY + 16, 18 + Math.sin(frameCount * 0.06) * 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
         drawPixelChar(drawX, drawY, npc.dir, true, npc.colors, bob, isWalking);
+        if (npc.isSpirit) {
+            ctx.globalAlpha = 1;
+        }
 
         // Name tag
         ctx.fillStyle = 'rgba(0,0,0,0.6)';
         ctx.font = '7px "Press Start 2P"';
         const nameW = ctx.measureText(npc.name).width + 8;
         ctx.fillRect(drawX + 16 - nameW / 2, drawY - 8, nameW, 12);
-        ctx.fillStyle = npc.isBoss ? '#ff8080' : npc.questGiver ? PAL.gold : '#fff';
+        ctx.fillStyle = npc.isSpirit ? '#c0a0ff' : npc.isBoss ? '#ff8080' : npc.questGiver ? PAL.gold : '#fff';
         ctx.textAlign = 'center';
         ctx.fillText(npc.name, drawX + 16, drawY);
         ctx.textAlign = 'left';
@@ -2659,7 +2808,7 @@ function drawDiploma() {
         ctx.globalAlpha = 1;
     }
 
-    if (diplomaPhase >= 3) {
+    if (diplomaPhase === 3) {
         // Congratulations message below diploma
         ctx.fillStyle = PAL.gold;
         ctx.font = '12px "Press Start 2P"';
@@ -2674,11 +2823,75 @@ function drawDiploma() {
         if (Math.floor(frameCount / 25) % 2 === 0) {
             ctx.fillStyle = '#8080b0';
             ctx.font = '8px "Press Start 2P"';
-            ctx.fillText('Press SPACE to play again', 400, 575);
+            ctx.fillText('Press SPACE to continue', 400, 575);
         }
 
         if (keyJustPressed(' ') || keyJustPressed('Enter')) {
-            // Reset game and return to title
+            diplomaPhase = 4;
+            diplomaTimer = 0;
+        }
+    }
+
+    if (diplomaPhase === 4) {
+        // Further Reading page
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.92)';
+        ctx.fillRect(0, 0, 800, 600);
+
+        ctx.fillStyle = PAL.gold;
+        ctx.font = '14px "Press Start 2P"';
+        ctx.fillText('FURTHER READING', 400, 60);
+
+        ctx.strokeStyle = '#c8a050';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(200, 72);
+        ctx.lineTo(600, 72);
+        ctx.stroke();
+
+        ctx.fillStyle = '#c0c0e0';
+        ctx.font = '8px "Press Start 2P"';
+        ctx.fillText('To learn more about Ethiopian Christianity', 400, 100);
+        ctx.fillText('and the Protestant Reformation:', 400, 118);
+
+        ctx.textAlign = 'left';
+        ctx.font = '7px "Press Start 2P"';
+        let readingY = 160;
+        furtherReading.forEach((source, idx) => {
+            ctx.fillStyle = '#a0a0d0';
+            ctx.fillText((idx + 1) + '.', 100, readingY);
+            ctx.fillStyle = '#d0d0e0';
+            // Wrap long titles
+            const lines = [];
+            const words = source.split(' ');
+            let line = '';
+            words.forEach(word => {
+                const test = line + (line ? ' ' : '') + word;
+                if (ctx.measureText(test).width > 560 && line) {
+                    lines.push(line);
+                    line = word;
+                } else {
+                    line = test;
+                }
+            });
+            if (line) lines.push(line);
+            lines.forEach((l, li) => {
+                ctx.fillText(l, 130, readingY + li * 16);
+            });
+            readingY += lines.length * 16 + 12;
+        });
+
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#8888bb';
+        ctx.font = '8px "Press Start 2P"';
+        ctx.fillText('Thank you for playing Reformers Quest!', 400, 500);
+
+        if (Math.floor(frameCount / 25) % 2 === 0) {
+            ctx.fillStyle = '#8080b0';
+            ctx.font = '8px "Press Start 2P"';
+            ctx.fillText('Press SPACE to play again', 400, 560);
+        }
+
+        if (keyJustPressed(' ') || keyJustPressed('Enter')) {
             resetGame();
             gameState = 'title';
         }
@@ -2973,8 +3186,11 @@ function resetGame() {
         inventory: [],
         currentMap: 'aksum',
         name: 'Young Scholar',
-        hasScroll: false
+        hasScroll: false,
+        visitedArtifacts: [],
+        talkedToNpcs: []
     };
+    activeArtifact = null;
     battleState = null;
     currentDialogue = null;
     npcWalkSequence = null;
@@ -3013,7 +3229,129 @@ function resetGame() {
     });
 }
 
-//  Main Game Loop 
+// Further reading sources for diploma
+const furtherReading = [
+    'Getatchew Haile, "The Ethiopian Orthodox Church\'s Tradition" (2004)',
+    'Matteo Ferrara, "Ethiopian Christianity and the Reformation" (2017)',
+    'David Daniels, "Luther and the Ethiopian Deacon" (2018)',
+    'Wendy Belcher, "The African Foundations of the Protestant Reformation" (2020)',
+    'Sergew Hable Selassie, "Ancient and Medieval Ethiopian History to 1270" (1972)',
+    'Martin Luther, "Table Talk" -- entries referencing Ethiopian Christianity (1534)'
+];
+
+// Region completion helper for spirit guide logic
+function getRegionCompletion(region) {
+    const map = maps[region];
+    if (!map) return { npcsTotal: 0, npcsDone: 0, npcsRemaining: [], artifactsTotal: 0, artifactsDone: 0, artifactsRemaining: [], isComplete: false };
+
+    // Regular NPCs: not spirits, not guards
+    const regularNpcs = map.npcs.filter(n => !n.isSpirit && n.id !== 'guard_aksum');
+    const npcsTotal = regularNpcs.length;
+    const npcsDone = regularNpcs.filter(n => playerData.talkedToNpcs.includes(n.id)).length;
+    const npcsRemaining = regularNpcs.filter(n => !playerData.talkedToNpcs.includes(n.id)).map(n => n.name);
+
+    const regionArtifacts = artifacts[region] || [];
+    const artifactsTotal = regionArtifacts.length;
+    const artifactsDone = regionArtifacts.filter(a => playerData.visitedArtifacts.includes(a.id)).length;
+    const artifactsRemaining = regionArtifacts.filter(a => !playerData.visitedArtifacts.includes(a.id)).map(a => a.title);
+
+    let isComplete = (npcsDone >= npcsTotal) && (artifactsDone >= artifactsTotal);
+    // For aksum, also require hasScroll
+    if (region === 'aksum') {
+        isComplete = isComplete && playerData.hasScroll;
+    }
+
+    return { npcsTotal, npcsDone, npcsRemaining, artifactsTotal, artifactsDone, artifactsRemaining, isComplete };
+}
+
+// Artifact popup update/draw
+function updateArtifactPopup() {
+    if (keyJustPressed(' ') || keyJustPressed('Enter')) {
+        activeArtifact = null;
+        gameState = 'overworld';
+    }
+}
+
+function drawArtifactPopup() {
+    if (!activeArtifact) return;
+
+    // Semi-transparent backdrop
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.fillRect(0, 0, 800, 600);
+
+    // Parchment panel
+    const panelX = 100;
+    const panelY = 60;
+    const panelW = 600;
+    const panelH = 480;
+
+    ctx.fillStyle = PAL.parchment;
+    ctx.fillRect(panelX, panelY, panelW, panelH);
+    ctx.strokeStyle = '#8B6914';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(panelX, panelY, panelW, panelH);
+    ctx.strokeStyle = '#c8a050';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(panelX + 8, panelY + 8, panelW - 16, panelH - 16);
+
+    // Try to draw image from cache
+    const img = imageCache[activeArtifact.id];
+    const imgX = panelX + (panelW - 240) / 2;
+    const imgY = panelY + 30;
+    const imgW = 240;
+    const imgH = 180;
+
+    if (img) {
+        try {
+            ctx.drawImage(img, imgX, imgY, imgW, imgH);
+            ctx.strokeStyle = '#8B6914';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(imgX, imgY, imgW, imgH);
+        } catch (e) {
+            // Fallback
+            ctx.fillStyle = '#d4c4a0';
+            ctx.fillRect(imgX, imgY, imgW, imgH);
+            ctx.fillStyle = '#8B6914';
+            ctx.font = '8px "Press Start 2P"';
+            ctx.textAlign = 'center';
+            ctx.fillText('[Image unavailable]', imgX + imgW / 2, imgY + imgH / 2);
+            ctx.textAlign = 'left';
+        }
+    } else {
+        // Fallback placeholder
+        ctx.fillStyle = '#d4c4a0';
+        ctx.fillRect(imgX, imgY, imgW, imgH);
+        ctx.fillStyle = '#8B6914';
+        ctx.font = '8px "Press Start 2P"';
+        ctx.textAlign = 'center';
+        ctx.fillText('[Loading image...]', imgX + imgW / 2, imgY + imgH / 2);
+        ctx.textAlign = 'left';
+    }
+
+    // Title in gold
+    ctx.fillStyle = '#8B6914';
+    ctx.font = '12px "Press Start 2P"';
+    ctx.textAlign = 'center';
+    ctx.fillText(activeArtifact.title, panelX + panelW / 2, imgY + imgH + 35);
+
+    // Description
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#4a3020';
+    ctx.font = '9px "Press Start 2P"';
+    wrapText(activeArtifact.description, panelX + 30, imgY + imgH + 60, panelW - 60, 18);
+    ctx.textAlign = 'center';
+
+    // Close prompt
+    if (Math.floor(frameCount / 25) % 2 === 0) {
+        ctx.fillStyle = '#8B6914';
+        ctx.font = '8px "Press Start 2P"';
+        ctx.fillText('Press SPACE to close', panelX + panelW / 2, panelY + panelH - 20);
+    }
+
+    ctx.textAlign = 'left';
+}
+
+//  Main Game Loop
 function update() {
     frameCount++;
     updateParticles();
@@ -3024,6 +3362,7 @@ function update() {
         case 'overworld': updateOverworld(); break;
         case 'npcWalking': updateNpcWalk(); break;
         case 'dialogue': updateDialogue(); break;
+        case 'artifactPopup': updateArtifactPopup(); break;
         case 'battleIntro':
         case 'battle': updateBattle(); break;
         case 'victory': break;
@@ -3044,6 +3383,10 @@ function draw() {
         case 'dialogue':
             drawOverworld();
             drawDialogue();
+            break;
+        case 'artifactPopup':
+            drawOverworld();
+            drawArtifactPopup();
             break;
         case 'battleIntro':
         case 'battle': drawBattle(); break;
