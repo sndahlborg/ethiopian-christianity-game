@@ -1,0 +1,2395 @@
+// ============================================================
+// REFORMERS QUEST — Ethiopian Christianity & the Reformation
+// A Pokemon Kanto-style educational adventure
+// ============================================================
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// ── Global State ──
+const TILE = 32;
+const COLS = 25;
+const ROWS = 18;
+
+let gameState = 'title'; // title, prologue, overworld, dialogue, battle, battleIntro, victory, diploma, mapTransition
+let keys = {};
+let frameCount = 0;
+let playerData = {
+    x: 5, y: 8,
+    dir: 'down',
+    moving: false,
+    moveProgress: 0,
+    targetX: 5, targetY: 8,
+    xp: 0,
+    level: 1,
+    hp: 100,
+    maxHp: 100,
+    wisdom: 10,
+    questionsAnswered: 0,
+    correctAnswers: 0,
+    defeatedBosses: [],
+    inventory: [],
+    currentMap: 'aksum',
+    name: 'Young Scholar',
+    hasScroll: false
+};
+
+let currentDialogue = null;
+let dialogueIndex = 0;
+let dialogueCharIndex = 0;
+let dialogueTimer = 0;
+let dialogueComplete = false;
+let dialogueCallback = null;
+
+let battleState = null;
+let titleSelection = 0;
+let titleBlink = 0;
+
+let mapTransitionAlpha = 0;
+let mapTransitionDir = 0;
+let mapTransitionTarget = null;
+
+let screenShake = 0;
+let particles = [];
+
+// Prologue state
+let prologueStep = 0;
+let prologueTimer = 0;
+let prologueTextIndex = 0;
+let prologueTextTimer = 0;
+let prologueComplete = false;
+
+// Diploma state
+let diplomaTimer = 0;
+let diplomaPhase = 0;
+
+// NPC walk sequence state
+let npcWalkSequence = null; // { npc, steps: [{x,y}], stepIndex, moveProgress, callback, dialogueAfter }
+
+const prologueSlides = [
+    {
+        title: 'Europe, Early 1500s',
+        text: 'The Catholic Church rules all of Christendom. The Pope in Rome holds supreme power. To question him is to question God.',
+        bg: 'dark'
+    },
+    {
+        title: 'Corruption Spreads...',
+        text: 'The Church sells "indulgences" — pay money, and your sins are forgiven. Pay more, and your dead relatives escape Purgatory. The poor suffer while the Church grows rich.',
+        bg: 'red'
+    },
+    {
+        title: 'A Monk Takes a Stand',
+        text: 'In 1517, a German monk named Martin Luther nails 95 complaints to a church door in Wittenberg. He demands reform: Scripture in local languages, communion for all, married clergy. This act sparks the Protestant Reformation.',
+        bg: 'gold'
+    },
+    {
+        title: 'But far away, in Africa...',
+        text: 'The Ethiopian Orthodox Church has practiced Christianity since the 4th century — over 1,000 years before Luther was born. They already have everything Luther is fighting for.',
+        bg: 'green'
+    },
+    {
+        title: 'Your Quest Begins',
+        text: 'You are a young scholar in the Kingdom of Aksum, Ethiopia. The church elders have chosen you for a sacred mission: carry a scroll documenting Ethiopian Christian practices to Martin Luther in Wittenberg. Your journey will change history.',
+        bg: 'blue'
+    }
+];
+
+// ── Color Palette (Kanto-inspired) ──
+const PAL = {
+    bg: '#1a1a2e',
+    grass: '#3a7d44',
+    grassLight: '#4a9d54',
+    path: '#c4a35a',
+    pathLight: '#d4b36a',
+    water: '#2e6b9e',
+    waterLight: '#4e8bbe',
+    wall: '#6b5b4e',
+    wallTop: '#8b7b6e',
+    roof: '#b83030',
+    roofLight: '#d84040',
+    door: '#4a3520',
+    sand: '#e8d5a3',
+    rock: '#7a7a7a',
+    tree: '#2a5a2a',
+    treeTop: '#3a8a3a',
+    church: '#d4c4a0',
+    churchCross: '#ffd700',
+    npcRobe: '#8b0000',
+    npcSkin: '#c68642',
+    white: '#ffffff',
+    black: '#000000',
+    textBg: '#181830',
+    textBorder: '#5858a8',
+    hpGreen: '#30c830',
+    hpYellow: '#d8d830',
+    hpRed: '#d83030',
+    xpBlue: '#3070d8',
+    gold: '#ffd700',
+    purple: '#7848a8',
+    parchment: '#f5e6c8',
+    ink: '#2a1a0a',
+    cobblestone: '#8a7a6a',
+    cobbleLight: '#9a8a7a',
+};
+
+// ── Sprite Drawing (Pixel Art) ──
+function drawPixelChar(x, y, dir, isNpc, colors, bobOffset = 0, isMoving = false) {
+    const px = Math.floor(x);
+    const py = Math.floor(y + bobOffset);
+    const s = 2;
+    const bodyColor = colors.body || '#3060b0';
+    const skinColor = colors.skin || '#f0c8a0';
+    const hairColor = colors.hair || '#402010';
+    const eyeColor = colors.eyes || '#202020';
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(px + 6, py + 28, 20, 4);
+
+    // Body
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(px + 8, py + 14, 16, 12);
+
+    // Arms with walk animation
+    const armSwing = isMoving ? Math.sin(frameCount * 0.3) * 3 : 0;
+    ctx.fillRect(px + 4, py + 14 + armSwing, 4, 10);
+    ctx.fillRect(px + 24, py + 14 - armSwing, 4, 10);
+
+    // Legs
+    const legSwing = isMoving ? Math.sin(frameCount * 0.3) * 2 : 0;
+    ctx.fillStyle = colors.legs || '#203060';
+    ctx.fillRect(px + 10, py + 26 + legSwing, 5, 4);
+    ctx.fillRect(px + 17, py + 26 - legSwing, 5, 4);
+
+    // Feet
+    ctx.fillStyle = colors.shoes || '#402020';
+    ctx.fillRect(px + 9, py + 28 + legSwing, 6, 3);
+    ctx.fillRect(px + 17, py + 28 - legSwing, 6, 3);
+
+    // Head
+    ctx.fillStyle = skinColor;
+    ctx.fillRect(px + 9, py + 2, 14, 13);
+
+    // Hair
+    ctx.fillStyle = hairColor;
+    if (dir === 'down' || dir === 'left' || dir === 'right') {
+        ctx.fillRect(px + 8, py, 16, 5);
+        ctx.fillRect(px + 8, py + 2, 3, 8);
+        ctx.fillRect(px + 21, py + 2, 3, 8);
+    } else {
+        ctx.fillRect(px + 8, py, 16, 6);
+        ctx.fillRect(px + 8, py + 2, 16, 10);
+    }
+
+    // Face
+    if (dir === 'down') {
+        ctx.fillStyle = eyeColor;
+        ctx.fillRect(px + 12, py + 7, 3, 3);
+        ctx.fillRect(px + 18, py + 7, 3, 3);
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(px + 12, py + 7, 2, 2);
+        ctx.fillRect(px + 18, py + 7, 2, 2);
+        ctx.fillStyle = skinColor;
+        ctx.fillRect(px + 14, py + 11, 5, 2);
+    } else if (dir === 'up') {
+        // back of head
+    } else if (dir === 'left') {
+        ctx.fillStyle = eyeColor;
+        ctx.fillRect(px + 11, py + 7, 3, 3);
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(px + 11, py + 7, 2, 2);
+    } else {
+        ctx.fillStyle = eyeColor;
+        ctx.fillRect(px + 19, py + 7, 3, 3);
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(px + 20, py + 7, 2, 2);
+    }
+
+    // Special items
+    if (colors.hat) {
+        ctx.fillStyle = colors.hat;
+        ctx.fillRect(px + 6, py - 2, 20, 4);
+        ctx.fillRect(px + 10, py - 6, 12, 5);
+    }
+    if (colors.cross) {
+        ctx.fillStyle = colors.cross;
+        ctx.fillRect(px + 14, py + 15, 4, 10);
+        ctx.fillRect(px + 10, py + 18, 12, 3);
+    }
+    if (colors.scroll) {
+        ctx.fillStyle = '#f5e6c8';
+        ctx.fillRect(px + 26, py + 16, 6, 8);
+        ctx.fillStyle = '#c8a878';
+        ctx.fillRect(px + 26, py + 15, 6, 2);
+        ctx.fillRect(px + 26, py + 24, 6, 2);
+    }
+    if (colors.crown) {
+        ctx.fillStyle = PAL.gold;
+        ctx.fillRect(px + 10, py - 4, 12, 4);
+        ctx.fillRect(px + 10, py - 7, 3, 3);
+        ctx.fillRect(px + 15, py - 7, 3, 3);
+        ctx.fillRect(px + 20, py - 7, 3, 3);
+    }
+    if (colors.satchel) {
+        ctx.fillStyle = '#8B4513';
+        ctx.fillRect(px + 24, py + 16, 7, 9);
+        ctx.fillStyle = '#A0522D';
+        ctx.fillRect(px + 25, py + 17, 5, 7);
+        // scroll peeking out
+        if (playerData.hasScroll) {
+            ctx.fillStyle = '#f5e6c8';
+            ctx.fillRect(px + 26, py + 14, 3, 4);
+        }
+    }
+    if (colors.quill) {
+        ctx.fillStyle = '#f5f5dc';
+        ctx.fillRect(px + 27, py + 10, 2, 12);
+        ctx.fillStyle = '#1a1a4a';
+        ctx.fillRect(px + 27, py + 20, 2, 4);
+    }
+    if (colors.miter) {
+        // Bishop/Pope hat
+        ctx.fillStyle = colors.miter;
+        ctx.fillRect(px + 9, py - 6, 14, 8);
+        ctx.fillRect(px + 12, py - 12, 8, 8);
+        ctx.fillStyle = PAL.gold;
+        ctx.fillRect(px + 9, py - 1, 14, 2);
+    }
+}
+
+// ── Map Data ──
+const maps = {
+    aksum: {
+        name: 'Kingdom of Aksum — Ethiopia',
+        width: 25, height: 18,
+        playerStart: { x: 12, y: 14 },
+        tiles: generateAksumMap(),
+        npcs: [
+            {
+                id: 'elder',
+                x: 12, y: 8,
+                dir: 'down',
+                colors: { body: '#f5f5dc', skin: '#8d5524', hair: '#e0e0e0', legs: '#d4c4a0', shoes: '#8B4513', cross: PAL.gold, hat: '#f5f5dc' },
+                name: 'Elder Abba Salama',
+                questGiver: true,
+                dialogue: [
+                    'Ah, you have arrived, young scholar. I have been expecting you.',
+                    'I am Abba Salama, keeper of the sacred texts here in the Kingdom of Aksum.',
+                    'Our Ethiopian Orthodox Church is one of the oldest in the world — we have followed Christ since the 4th century!',
+                    'Long before Europe built its great cathedrals, we had our own Bible, our own sacred language called Ge\'ez, and our own traditions.',
+                    'Now listen carefully... A monk in faraway Germany named Martin Luther is challenging the Catholic Church.',
+                    'He demands reforms that WE have practiced for over a THOUSAND years!',
+                    'I am entrusting you with this sacred scroll. It documents our practices — communion in both kinds, Scripture in our own language, and married clergy.',
+                    'You must carry it across the world to Martin Luther in Wittenberg, Germany.',
+                    'But first — speak to the others here in Aksum. Learn what makes our church special. You will need this knowledge on your journey.',
+                    '⭐ You received the SACRED SCROLL! ⭐'
+                ],
+                onComplete: () => {
+                    playerData.hasScroll = true;
+                    playerData.inventory.push('Sacred Scroll');
+                }
+            },
+            {
+                id: 'monk_ezra',
+                x: 6, y: 5,
+                dir: 'right',
+                colors: { body: '#8b0000', skin: '#8d5524', hair: '#1a1a1a', legs: '#4a2020', shoes: '#2a1010', cross: '#c0c0c0' },
+                name: 'Brother Ezra',
+                dialogue: [
+                    'Welcome! I am Brother Ezra, a monk of the Ethiopian Orthodox Church.',
+                    'Come — follow me to the scriptorium! I want to show you something.'
+                ],
+                walkAfterDialogue: {
+                    steps: [{ x: 6, y: 7 }, { x: 8, y: 7 }, { x: 8, y: 9 }],
+                    dialogue: [
+                        { name: 'Brother Ezra', text: 'Here — look at these sacred texts. We read Scripture in Ge\'ez, our own language.' },
+                        { name: 'Brother Ezra', text: 'Every believer can hear God\'s word in a tongue they understand!' },
+                        { name: 'Brother Ezra', text: 'In Europe, the Catholic Church forces everyone to read the Bible only in Latin — a language most people cannot understand!' },
+                        { name: 'Brother Ezra', text: 'Martin Luther is fighting to change that. But we have done it here for over a thousand years!' },
+                        { name: 'Brother Ezra', text: 'This is called "vernacular Scripture" — using the people\'s own language. Remember this!' }
+                    ]
+                }
+            },
+            {
+                id: 'priest_tekle',
+                x: 18, y: 6,
+                dir: 'left',
+                colors: { body: '#daa520', skin: '#8d5524', hair: '#1a1a1a', legs: '#8B6914', shoes: '#654321' },
+                name: 'Father Tekle',
+                dialogue: [
+                    'Greetings, young one! I am Father Tekle. Yes — FATHER. I have a wife and three children!',
+                    'In our Ethiopian Church, priests are allowed to marry. We see marriage as a BLESSING, not a barrier to serving God.',
+                    'But in the Catholic Church of Europe? Priests are forbidden from marrying! They call it "celibacy."',
+                    'Luther believes this rule is unnatural and harmful. He argues that clergy should be free to marry.',
+                    'When he makes this argument, he is asking for something we Ethiopians have practiced for centuries!',
+                    'Also — when we celebrate communion, ALL believers receive both the bread AND the wine.',
+                    'In the Roman Catholic Church, only priests get the wine! Regular people only receive bread. Luther calls this deeply wrong.'
+                ],
+                quiz: true
+            },
+            {
+                id: 'scholar_yohannes',
+                x: 3, y: 12,
+                dir: 'right',
+                colors: { body: '#4a3080', skin: '#8d5524', hair: '#2a2a2a', legs: '#2a2050', shoes: '#1a1040', scroll: true },
+                name: 'Debtera Yohannes',
+                dialogue: [
+                    'I am a debtera — a scholar of the church. I spend my days studying our ancient texts.',
+                    'Did you know? The Ethiopian eunuch in the Book of Acts is believed to be the FIRST non-Jewish person to convert to Christianity!',
+                    'This makes Ethiopia potentially the first Christian kingdom in all of history!',
+                    'Our faith is not some copy of European Christianity. It is OLDER. It is ORIGINAL.',
+                    'Luther himself mentions Ethiopia at least 85 times in his writings. He calls our church "uncorrupted by the Roman papacy."',
+                    'When you reach Wittenberg, tell Luther that our practices are proof his reforms have a historical AND biblical foundation!'
+                ]
+            },
+            {
+                id: 'guard_aksum',
+                x: 22, y: 9,
+                dir: 'down',
+                colors: { body: '#6a5a3a', skin: '#6f4e37', hair: '#1a1a1a', legs: '#4a3a2a', shoes: '#3a2a1a' },
+                name: 'Captain Dawit',
+                dialogue: playerData.hasScroll ? [
+                    'You carry the sacred scroll? Then you may pass to Lalibela.',
+                    'But first, you must prove you have learned from the monks here.',
+                    'Defeat the Guardian Spirit in a quiz battle to earn passage!'
+                ] : [
+                    'The road south to Lalibela is dangerous, young scholar.',
+                    'Speak to Elder Abba Salama first — he has been asking for you.',
+                    'And learn from our monks before you attempt the journey!'
+                ],
+                blocks: 'lalibela'
+            }
+        ],
+        warps: [
+            { x: 24, y: 9, target: 'lalibela', tx: 0, ty: 9, requires: 'quiz1' }
+        ]
+    },
+    lalibela: {
+        name: 'Lalibela — City of Rock Churches',
+        width: 25, height: 18,
+        playerStart: { x: 1, y: 9 },
+        tiles: generateLalibelaMap(),
+        npcs: [
+            {
+                id: 'michael',
+                x: 12, y: 6,
+                dir: 'down',
+                colors: { body: '#c8a050', skin: '#8d5524', hair: '#1a1a1a', legs: '#6a5020', shoes: '#4a3010', cross: '#c0c0c0' },
+                name: 'Michael the Deacon',
+                dialogue: [
+                    'You there! Young scholar! Come closer.',
+                    'I am Michael — Michael the Deacon. I am preparing for a very long journey.',
+                    'Walk with me — let me show you the church where I received my calling.'
+                ],
+                walkAfterDialogue: {
+                    steps: [{ x: 12, y: 8 }, { x: 14, y: 8 }, { x: 14, y: 9 }],
+                    dialogue: [
+                        { name: 'Michael the Deacon', text: 'The church elders have asked me to travel to Europe — to Wittenberg, Germany.' },
+                        { name: 'Michael the Deacon', text: 'There is a monk there named Martin Luther who is shaking the foundations of the Catholic Church!' },
+                        { name: 'Michael the Deacon', text: 'In the year 1534, I will meet him face to face. And when I do...' },
+                        { name: 'Michael the Deacon', text: 'Luther will give me full communion — both bread AND wine. A great honor he denies to many other groups!' },
+                        { name: 'Michael the Deacon', text: 'He will see in me — in OUR church — living proof that his ideas are not radical new inventions...' },
+                        { name: 'Michael the Deacon', text: 'But ancient Christian traditions that the Catholic Church in Rome abandoned long ago!' },
+                        { name: 'Michael the Deacon', text: 'Our meeting will prove that a church can thrive WITHOUT a Pope, WITHOUT indulgences, WITHOUT forced celibacy!' },
+                        { name: 'Michael the Deacon', text: 'Carry your scroll well, young scholar. We are both messengers of the same truth.' }
+                    ]
+                },
+                quiz: true
+            },
+            {
+                id: 'builder',
+                x: 6, y: 12,
+                dir: 'right',
+                colors: { body: '#a0522d', skin: '#8d5524', hair: '#3a3a3a', legs: '#5a3a1a', shoes: '#3a2a0a' },
+                name: 'Master Builder Gebre',
+                dialogue: [
+                    'Ha! Watch your step, young one! You stand before one of the wonders of the world!',
+                    'I am Gebre, master builder. Well — not me personally. King Lalibela built these in the 12th century.',
+                    'These churches were carved straight DOWN into solid rock! Not built UP — carved DOWN!',
+                    'The most famous is Bete Giyorgis — the Church of St. George — shaped like a perfect cross.',
+                    'King Lalibela built them as a "New Jerusalem" so Ethiopian Christians would not need to travel to the Holy Land.',
+                    'These churches prove that Ethiopia had a rich, independent Christian civilization hundreds of years before Europeans arrived.',
+                    'When people say Christianity is a "European religion"... show them Lalibela!'
+                ]
+            },
+            {
+                id: 'nun_miriam',
+                x: 19, y: 8,
+                dir: 'left',
+                colors: { body: '#f0f0f0', skin: '#8d5524', hair: '#1a1a1a', legs: '#a0a0a0', shoes: '#505050', hat: '#f0f0f0' },
+                name: 'Sister Miriam',
+                dialogue: [
+                    'Peace be with you, young scholar. I am Sister Miriam.',
+                    'Let me tell you about two things the Catholic Church teaches that we Ethiopians have NEVER accepted.',
+                    'First: PURGATORY. The Catholics teach there is a place of punishment after death, before heaven.',
+                    'They tell people: "Pay the Church money, and we will pray your loved ones OUT of Purgatory!" These payments are called INDULGENCES.',
+                    'Luther was FURIOUS about indulgences. His famous 95 Theses were largely a protest against them!',
+                    'Second: the PRIMACY OF THE POPE. Catholics believe the Pope — the Bishop of Rome — is supreme ruler of ALL Christians.',
+                    'We Ethiopians never accepted this. We have our own leader — the Abuna. We answer to God, not to Rome.',
+                    'When Luther challenges the Pope\'s authority, he is walking a path we have walked for centuries.',
+                    'Continue west to Wittenberg, young scholar. Luther needs to hear what you have learned!'
+                ]
+            }
+        ],
+        warps: [
+            { x: 0, y: 9, target: 'aksum', tx: 23, ty: 9 },
+            { x: 24, y: 9, target: 'wittenberg', tx: 0, ty: 9, requires: 'quiz2' }
+        ]
+    },
+    wittenberg: {
+        name: 'Wittenberg — Germany, 1534',
+        width: 25, height: 18,
+        playerStart: { x: 1, y: 9 },
+        tiles: generateWittenbergMap(),
+        npcs: [
+            {
+                id: 'townsperson',
+                x: 5, y: 12,
+                dir: 'right',
+                colors: { body: '#6a7a4a', skin: '#f0c8a0', hair: '#5a3a1a', legs: '#4a5a2a', shoes: '#3a2a1a' },
+                name: 'Hans the Townsman',
+                dialogue: [
+                    'You look like you\'ve traveled a long way! Welcome to Wittenberg!',
+                    'Things have been... exciting here lately. Have you heard of Martin Luther?',
+                    'Seventeen years ago, in 1517, he nailed a list of 95 complaints to the door of the Castle Church!',
+                    'He was protesting the Catholic Church\'s corruption — especially the selling of indulgences.',
+                    'They called him a heretic! The Pope himself condemned him! But Luther would not back down.',
+                    'His act sparked what we now call the Protestant Reformation — "Protestant" because we are PROTESTING!',
+                    'Luther says the Bible should be in German, not just Latin. He says priests should marry. He says the Pope is not supreme.',
+                    'Many people agree with him. But the Catholic Church is powerful and dangerous...',
+                    'If you seek Luther, he is at the university. But be warned — he is a busy man!'
+                ]
+            },
+            {
+                id: 'student_katarina',
+                x: 20, y: 6,
+                dir: 'left',
+                colors: { body: '#a04040', skin: '#f0c8a0', hair: '#2a1a0a', legs: '#603030', shoes: '#402020', quill: true },
+                name: 'Student Katarina',
+                dialogue: [
+                    'Oh! Are you the scholar from Ethiopia? Luther has been hoping someone like you would come!',
+                    'I study theology here at the university. Let me help you understand something important.',
+                    'Many people think Luther just woke up one day and decided to rebel. But that\'s not the whole story.',
+                    'Luther studied the Bible deeply. He came to believe that Christianity had been corrupted over centuries.',
+                    'But here is the question scholars debate: was Ethiopian Christianity Luther\'s BLUEPRINT? Or his VALIDATION?',
+                    'Luther didn\'t copy Ethiopia — he developed his own ideas from the Bible.',
+                    'But learning about Ethiopia CONFIRMED his reforms. It proved they could work in practice!',
+                    'Ethiopia was the "proof of concept" — a church that thrived for centuries doing exactly what Luther proposed.',
+                    'Think about it: if the Ethiopian Church existed for 1,000+ years without a Pope, without indulgences... then Luther\'s ideas weren\'t radical at all!',
+                    'That is why your scroll matters so much. Go speak to Luther himself!'
+                ]
+            },
+            {
+                id: 'luther',
+                x: 12, y: 4,
+                dir: 'down',
+                colors: { body: '#1a1a1a', skin: '#f0c8a0', hair: '#3a2a1a', legs: '#1a1a1a', shoes: '#0a0a0a', scroll: true },
+                name: 'Martin Luther',
+                dialogue: [
+                    '...',
+                    'Another visitor? I am very busy preparing my — wait.',
+                    'That satchel... is that a scroll from Ethiopia?!',
+                    'Come closer! I am Martin Luther, professor of theology here at the University of Wittenberg.',
+                    'In 1517, I posted my 95 Theses on the church door, demanding reform of the Catholic Church.',
+                    'I called for communion in both kinds! Scripture in the common tongue! The right of clergy to marry!',
+                    'The Pope called me a HERETIC. Kings wanted me arrested. I was forced into hiding.',
+                    'But then I heard whispers of the Ethiopian Church... a church that already practiced everything I was fighting for!',
+                    'When Michael the Deacon visited me here in Wittenberg, he confirmed what I had hoped:',
+                    'Your Ethiopian Church has been "uncorrupted by the Roman papacy" for over a THOUSAND years!',
+                    'Your practices of communion, vernacular Scripture, married clergy — these are not MY innovations.',
+                    'They are a RETURN to how Christianity was always meant to be practiced!',
+                    'The Church of Ethiopia has more fidelity — more TRUTH — to the Christian tradition than Rome!',
+                    'Your church is proof that my reforms have both a biblical AND a historical basis!',
+                    'Now, young scholar... let me test your knowledge. If you have truly learned on your journey, you will earn something special!'
+                ],
+                quiz: true,
+                isBoss: true
+            }
+        ],
+        warps: [
+            { x: 0, y: 9, target: 'lalibela', tx: 23, ty: 9 }
+        ]
+    }
+};
+
+function generateAksumMap() {
+    let m = [];
+    for (let y = 0; y < 18; y++) {
+        let row = [];
+        for (let x = 0; x < 25; x++) {
+            if (y === 0 || y === 17) row.push(4);
+            else if (x === 0 || x === 24) row.push(y === 9 ? 1 : 4);
+            else if (y >= 7 && y <= 10 && x >= 2) row.push(1); // main path
+            else if (x >= 11 && x <= 13 && y >= 5 && y <= 14) row.push(1); // vertical path
+            else if (x >= 5 && x <= 9 && y >= 3 && y <= 7) row.push(1); // left area
+            else if (x >= 5 && x <= 7 && y >= 3 && y <= 4) row.push(5); // church
+            else if (x >= 16 && x <= 20 && y >= 4 && y <= 8) row.push(1); // right area
+            else if (x >= 17 && x <= 19 && y >= 4 && y <= 5) row.push(5); // church 2
+            else if (y >= 14 && y <= 16 && x >= 16 && x <= 22) row.push(3); // lake
+            else if (Math.random() < 0.06) row.push(7);
+            else if (Math.random() < 0.1 && !(y >= 6 && y <= 11 && x >= 1 && x <= 23) && !(y >= 11 && y <= 15 && x >= 10 && x <= 14)) row.push(4);
+            else row.push(0);
+        }
+        m.push(row);
+    }
+    return m;
+}
+
+function generateLalibelaMap() {
+    let m = [];
+    for (let y = 0; y < 18; y++) {
+        let row = [];
+        for (let x = 0; x < 25; x++) {
+            if (y === 0 || y === 17) row.push(7);
+            else if (x === 0 || x === 24) row.push(y === 9 ? 1 : 7);
+            else if (y >= 8 && y <= 10 && x >= 0) row.push(1);
+            else if (x >= 10 && x <= 14 && y >= 3 && y <= 8) row.push(1);
+            else if (x >= 10 && x <= 14 && y >= 3 && y <= 5) row.push(2); // rock church
+            else if (x >= 4 && x <= 8 && y >= 10 && y <= 15) row.push(1);
+            else if (x >= 4 && x <= 7 && y >= 10 && y <= 11) row.push(2);
+            else if (x >= 17 && x <= 21 && y >= 6 && y <= 10) row.push(1);
+            else if (x >= 17 && x <= 21 && y >= 6 && y <= 7) row.push(2);
+            else if (Math.random() < 0.15) row.push(7);
+            else if (Math.random() < 0.06) row.push(4);
+            else row.push(8);
+        }
+        m.push(row);
+    }
+    return m;
+}
+
+function generateWittenbergMap() {
+    let m = [];
+    for (let y = 0; y < 18; y++) {
+        let row = [];
+        for (let x = 0; x < 25; x++) {
+            if (y === 0 || y === 17) row.push(2);
+            else if (x === 0) row.push(y === 9 ? 1 : 2);
+            else if (x === 24) row.push(2);
+            else if (y >= 8 && y <= 10) row.push(10); // cobblestone
+            else if (x >= 10 && x <= 14 && y >= 1 && y <= 8) row.push(10);
+            else if (x >= 10 && x <= 14 && y >= 1 && y <= 3) row.push(5); // church
+            else if (x >= 2 && x <= 6 && y >= 2 && y <= 5) row.push(2);
+            else if (x >= 18 && x <= 22 && y >= 2 && y <= 5) row.push(2);
+            else if (x >= 2 && x <= 6 && y >= 12 && y <= 15) row.push(2);
+            else if (x >= 18 && x <= 22 && y >= 12 && y <= 15) row.push(2);
+            else if (Math.random() < 0.04) row.push(4);
+            else row.push(0);
+        }
+        m.push(row);
+    }
+    return m;
+}
+
+// ── Quiz Questions ──
+const quizSets = {
+    quiz1: {
+        enemy: 'Guardian Spirit of Aksum',
+        enemyColors: { body: '#6a2090', skin: '#b090d0', hair: '#4a1070', legs: '#4a1060', shoes: '#3a0a50', crown: true },
+        questions: [
+            {
+                q: 'Since what century has the Ethiopian Church practiced Christianity?',
+                options: ['4th century', '10th century', '16th century', '1st century'],
+                correct: 0,
+                explain: 'The Ethiopian Church has practiced Christianity since the 4th century — over 1,600 years!'
+            },
+            {
+                q: 'What does "communion in both kinds" mean?',
+                options: ['Bread AND wine for all', 'Two church services', 'Praying twice daily', 'Both singing and reading'],
+                correct: 0,
+                explain: 'Communion in both kinds means ALL believers receive both bread and wine, not just priests.'
+            },
+            {
+                q: 'What was special about Ethiopian clergy that Luther also wanted for Europe?',
+                options: ['They could marry', 'They wore gold robes', 'They could travel freely', 'They spoke Latin'],
+                correct: 0,
+                explain: 'Ethiopian priests were allowed to marry. Luther fought for this same right for European clergy.'
+            },
+            {
+                q: 'What sacred language did Ethiopia use so believers could understand Scripture?',
+                options: ['Ge\'ez', 'Latin', 'Greek', 'Arabic'],
+                correct: 0,
+                explain: 'Ethiopia used Ge\'ez, their sacred vernacular language, so all believers could understand Scripture.'
+            }
+        ]
+    },
+    quiz2: {
+        enemy: 'Guardian Spirit of Lalibela',
+        enemyColors: { body: '#906020', skin: '#b090d0', hair: '#604010', legs: '#604020', shoes: '#403010', crown: true },
+        questions: [
+            {
+                q: 'Who was the Ethiopian cleric that visited Luther in 1534?',
+                options: ['Michael the Deacon', 'King Lalibela', 'Abba Salama', 'Emperor Zara'],
+                correct: 0,
+                explain: 'Michael the Deacon traveled from Ethiopia to Wittenberg and met Luther in 1534.'
+            },
+            {
+                q: 'What honor did Luther give Michael the Deacon?',
+                options: ['Full communion', 'A golden cross', 'A university degree', 'A royal title'],
+                correct: 0,
+                explain: 'Luther extended full communion to Michael — an honor he withheld from many other reform groups!'
+            },
+            {
+                q: 'What are "indulgences" that Luther protested against?',
+                options: ['Payments to reduce punishment in Purgatory', 'Special prayers at night', 'Church decorations', 'Holiday celebrations'],
+                correct: 0,
+                explain: 'Indulgences were payments to the Church that supposedly reduced time in Purgatory. Luther saw this as corruption.'
+            },
+            {
+                q: 'Why are Lalibela\'s churches considered a wonder?',
+                options: ['They were carved down into solid rock', 'They were made of gold', 'They float on water', 'They were the tallest buildings'],
+                correct: 0,
+                explain: 'Lalibela\'s churches were carved straight DOWN into solid rock — incredible 12th century engineering!'
+            },
+            {
+                q: 'The Ethiopian Church never accepted the authority of which figure?',
+                options: ['The Pope', 'Moses', 'King Solomon', 'The Emperor'],
+                correct: 0,
+                explain: 'Ethiopia never accepted Papal authority — the Pope in Rome had no power over the Ethiopian Church.'
+            }
+        ]
+    },
+    quiz3: {
+        enemy: 'Martin Luther',
+        enemyColors: { body: '#1a1a1a', skin: '#f0c8a0', hair: '#3a2a1a', legs: '#1a1a1a', shoes: '#0a0a0a', scroll: true },
+        isBoss: true,
+        questions: [
+            {
+                q: 'In what year did Luther post his 95 Theses?',
+                options: ['1517', '1492', '1776', '1534'],
+                correct: 0,
+                explain: 'Luther posted his famous 95 Theses in 1517, sparking the Protestant Reformation.'
+            },
+            {
+                q: 'Why is it called the "Protestant" Reformation?',
+                options: ['They were protesting the Catholic Church', 'They lived in a province', 'They were professional teachers', 'It was the name of their church'],
+                correct: 0,
+                explain: 'Protestant comes from "protest" — they were protesting the corruption of the Catholic Church!'
+            },
+            {
+                q: 'Luther called the Ethiopian Church...',
+                options: ['Uncorrupted by Roman papacy', 'A dangerous heresy', 'Too old to matter', 'A European colony'],
+                correct: 0,
+                explain: 'Luther praised Ethiopia as "uncorrupted by the Roman papacy" — a model of true Christianity.'
+            },
+            {
+                q: 'How many times did Luther mention Ethiopia in his writings?',
+                options: ['At least 85 times', 'Only once', 'Never', 'Exactly 10 times'],
+                correct: 0,
+                explain: 'Luther mentioned Ethiopia at least 85 times in his writings — it was clearly important to him!'
+            },
+            {
+                q: 'What is the BEST way to describe Ethiopian Christianity\'s role in the Reformation?',
+                options: ['It validated and proved Luther\'s reforms could work', 'Luther directly copied Ethiopia', 'They had no connection at all', 'Ethiopia copied Luther\'s ideas'],
+                correct: 0,
+                explain: 'Ethiopian Christianity VALIDATED Luther\'s ideas — proving his reforms had both biblical and historical basis!'
+            },
+            {
+                q: 'Which practices did BOTH Ethiopian Christianity and Luther\'s reforms share?',
+                options: ['Vernacular scripture, married clergy, communion in both kinds', 'Paying indulgences and obeying the Pope', 'Only reading in Latin', 'Believing in Purgatory'],
+                correct: 0,
+                explain: 'Both shared vernacular scripture, married clergy, and communion in both kinds — the cornerstones of the Reformation!'
+            }
+        ]
+    }
+};
+
+// Shuffle answers
+Object.values(quizSets).forEach(set => {
+    set.questions.forEach(q => {
+        const correctText = q.options[q.correct];
+        for (let i = q.options.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [q.options[i], q.options[j]] = [q.options[j], q.options[i]];
+        }
+        q.correct = q.options.indexOf(correctText);
+    });
+});
+
+// ── Tile Rendering ──
+function drawTile(x, y, type, mapName) {
+    const px = x * TILE;
+    const py = y * TILE;
+
+    switch (type) {
+        case 0: // grass
+            ctx.fillStyle = PAL.grass;
+            ctx.fillRect(px, py, TILE, TILE);
+            if ((x + y) % 3 === 0) {
+                ctx.fillStyle = PAL.grassLight;
+                ctx.fillRect(px + 4, py + 4, 3, 2);
+                ctx.fillRect(px + 18, py + 14, 3, 2);
+            }
+            if ((x * 7 + y * 13) % 5 === 0) {
+                ctx.fillStyle = '#4aad54';
+                ctx.fillRect(px + 12, py + 8, 2, 4);
+                ctx.fillRect(px + 10, py + 10, 6, 2);
+            }
+            break;
+        case 1: // path
+            ctx.fillStyle = PAL.path;
+            ctx.fillRect(px, py, TILE, TILE);
+            if ((x + y) % 4 === 0) {
+                ctx.fillStyle = PAL.pathLight;
+                ctx.fillRect(px + 8, py + 8, 6, 4);
+            }
+            ctx.fillStyle = 'rgba(0,0,0,0.05)';
+            ctx.fillRect(px, py, TILE, 1);
+            break;
+        case 2: // wall/building
+            ctx.fillStyle = PAL.wall;
+            ctx.fillRect(px, py, TILE, TILE);
+            ctx.fillStyle = PAL.wallTop;
+            ctx.fillRect(px, py, TILE, 4);
+            ctx.fillStyle = 'rgba(0,0,0,0.1)';
+            for (let by = 0; by < 4; by++) {
+                const offset = by % 2 === 0 ? 0 : TILE / 2;
+                ctx.fillRect(px + offset, py + by * 8, 1, 8);
+                ctx.fillRect(px + offset + TILE / 2, py + by * 8, 1, 8);
+                ctx.fillRect(px, py + by * 8, TILE, 1);
+            }
+            break;
+        case 3: // water
+            ctx.fillStyle = PAL.water;
+            ctx.fillRect(px, py, TILE, TILE);
+            const waveOff = Math.sin((frameCount + x * 3 + y * 5) * 0.05) * 2;
+            ctx.fillStyle = PAL.waterLight;
+            ctx.fillRect(px + 4 + waveOff, py + 8, 12, 2);
+            ctx.fillRect(px + 8 - waveOff, py + 20, 10, 2);
+            break;
+        case 4: // tree
+            ctx.fillStyle = PAL.grass;
+            ctx.fillRect(px, py, TILE, TILE);
+            ctx.fillStyle = '#5a3a1a';
+            ctx.fillRect(px + 12, py + 18, 8, 14);
+            ctx.fillStyle = PAL.tree;
+            ctx.fillRect(px + 4, py + 4, 24, 18);
+            ctx.fillStyle = PAL.treeTop;
+            ctx.fillRect(px + 6, py + 2, 20, 10);
+            ctx.fillRect(px + 8, py, 16, 6);
+            ctx.fillStyle = '#4aaa4a';
+            ctx.fillRect(px + 8, py + 4, 6, 4);
+            break;
+        case 5: // church
+            ctx.fillStyle = PAL.church;
+            ctx.fillRect(px, py, TILE, TILE);
+            ctx.fillStyle = PAL.roof;
+            ctx.fillRect(px, py, TILE, 8);
+            ctx.fillStyle = PAL.roofLight;
+            ctx.fillRect(px + 4, py, TILE - 8, 4);
+            ctx.fillStyle = PAL.churchCross;
+            ctx.fillRect(px + 14, py - 4, 4, 8);
+            ctx.fillRect(px + 10, py - 2, 12, 3);
+            break;
+        case 7: // rock
+            ctx.fillStyle = mapName === 'lalibela' ? '#c4a880' : PAL.grass;
+            ctx.fillRect(px, py, TILE, TILE);
+            ctx.fillStyle = PAL.rock;
+            ctx.fillRect(px + 4, py + 8, 24, 20);
+            ctx.fillStyle = '#8a8a8a';
+            ctx.fillRect(px + 6, py + 6, 20, 14);
+            ctx.fillStyle = '#9a9a9a';
+            ctx.fillRect(px + 8, py + 8, 8, 6);
+            break;
+        case 8: // sand
+            ctx.fillStyle = PAL.sand;
+            ctx.fillRect(px, py, TILE, TILE);
+            if ((x + y) % 3 === 0) {
+                ctx.fillStyle = '#d8c593';
+                ctx.fillRect(px + 6, py + 10, 4, 2);
+            }
+            break;
+        case 9: // bridge
+            ctx.fillStyle = '#7a5a2a';
+            ctx.fillRect(px, py, TILE, TILE);
+            ctx.fillStyle = '#6a4a1a';
+            ctx.fillRect(px, py, TILE, 4);
+            ctx.fillRect(px, py + TILE - 4, TILE, 4);
+            break;
+        case 10: // cobblestone (for Wittenberg)
+            ctx.fillStyle = PAL.cobblestone;
+            ctx.fillRect(px, py, TILE, TILE);
+            // cobble pattern
+            ctx.fillStyle = PAL.cobbleLight;
+            for (let cx = 0; cx < 4; cx++) {
+                for (let cy = 0; cy < 4; cy++) {
+                    const ox = cx * 8 + (cy % 2) * 4;
+                    ctx.fillRect(px + ox + 1, py + cy * 8 + 1, 6, 6);
+                }
+            }
+            ctx.fillStyle = 'rgba(0,0,0,0.06)';
+            ctx.fillRect(px, py, TILE, 1);
+            break;
+    }
+}
+
+function isSolid(mapKey, x, y) {
+    const map = maps[mapKey];
+    if (x < 0 || y < 0 || x >= map.width || y >= map.height) return true;
+    const tile = map.tiles[y][x];
+    if ([2, 3, 4, 5, 7].includes(tile)) return true;
+    for (const npc of map.npcs) {
+        if (npc.x === x && npc.y === y) return true;
+    }
+    return false;
+}
+
+// ── Input ──
+document.addEventListener('keydown', e => {
+    keys[e.key] = true;
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+        e.preventDefault();
+    }
+});
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+
+function keyJustPressed(key) {
+    if (keys[key] && !keys['_prev_' + key]) {
+        keys['_prev_' + key] = true;
+        return true;
+    }
+    if (!keys[key]) keys['_prev_' + key] = false;
+    return false;
+}
+
+// ── Particles ──
+function spawnParticles(x, y, color, count = 10) {
+    for (let i = 0; i < count; i++) {
+        particles.push({
+            x, y,
+            vx: (Math.random() - 0.5) * 4,
+            vy: (Math.random() - 0.5) * 4 - 2,
+            life: 30 + Math.random() * 20,
+            maxLife: 50,
+            color,
+            size: 2 + Math.random() * 3
+        });
+    }
+}
+
+function updateParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.1;
+        p.life--;
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+}
+
+function drawParticles() {
+    particles.forEach(p => {
+        const alpha = p.life / p.maxLife;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    });
+    ctx.globalAlpha = 1;
+}
+
+// ── NPC Walk Sequences ──
+// Triggered by dialogue — NPC says "Follow me!" then walks to a spot, stops, and continues talking
+function startNpcWalk(npc, steps, dialogueAfter) {
+    npcWalkSequence = {
+        npc,
+        steps, // [{x, y}, ...]
+        stepIndex: 0,
+        moveProgress: 0,
+        startX: npc.x,
+        startY: npc.y,
+        dialogueAfter
+    };
+    gameState = 'npcWalking';
+}
+
+function updateNpcWalk() {
+    if (!npcWalkSequence) return;
+    const seq = npcWalkSequence;
+    const target = seq.steps[seq.stepIndex];
+
+    seq.moveProgress += 0.08;
+    if (seq.moveProgress >= 1) {
+        seq.npc.x = target.x;
+        seq.npc.y = target.y;
+        seq.startX = target.x;
+        seq.startY = target.y;
+        seq.moveProgress = 0;
+        seq.stepIndex++;
+
+        if (seq.stepIndex >= seq.steps.length) {
+            // Walk done — show follow-up dialogue
+            const dlg = seq.dialogueAfter;
+            npcWalkSequence = null;
+            gameState = 'overworld';
+            if (dlg) {
+                startDialogue(dlg);
+            }
+            return;
+        }
+        // Update facing for next step
+        const next = seq.steps[seq.stepIndex];
+        if (next.x > seq.npc.x) seq.npc.dir = 'right';
+        else if (next.x < seq.npc.x) seq.npc.dir = 'left';
+        else if (next.y > seq.npc.y) seq.npc.dir = 'down';
+        else if (next.y < seq.npc.y) seq.npc.dir = 'up';
+    } else {
+        // Update facing direction
+        if (target.x > seq.startX) seq.npc.dir = 'right';
+        else if (target.x < seq.startX) seq.npc.dir = 'left';
+        else if (target.y > seq.startY) seq.npc.dir = 'down';
+        else if (target.y < seq.startY) seq.npc.dir = 'up';
+    }
+}
+
+function getNpcWalkInterp() {
+    if (!npcWalkSequence) return null;
+    const seq = npcWalkSequence;
+    const target = seq.steps[seq.stepIndex];
+    return {
+        npc: seq.npc,
+        x: seq.startX + (target.x - seq.startX) * seq.moveProgress,
+        y: seq.startY + (target.y - seq.startY) * seq.moveProgress
+    };
+}
+
+// ── Title Screen ──
+function updateTitle() {
+    titleBlink++;
+    if (keyJustPressed(' ') || keyJustPressed('Enter')) {
+        gameState = 'prologue';
+        prologueStep = 0;
+        prologueTimer = 0;
+        prologueTextIndex = 0;
+        prologueTextTimer = 0;
+        prologueComplete = false;
+    }
+}
+
+function drawTitle() {
+    ctx.fillStyle = '#0a0a20';
+    ctx.fillRect(0, 0, 800, 600);
+
+    // Animated stars
+    for (let i = 0; i < 60; i++) {
+        const sx = (i * 137 + frameCount * 0.3) % 800;
+        const sy = (i * 97 + Math.sin(frameCount * 0.02 + i) * 20) % 600;
+        ctx.fillStyle = `rgba(255,255,200,${0.3 + Math.sin(frameCount * 0.05 + i) * 0.3})`;
+        ctx.fillRect(sx, sy, 2, 2);
+    }
+
+    // Ethiopian cross
+    ctx.save();
+    ctx.translate(400, 150);
+    ctx.fillStyle = PAL.gold;
+    ctx.fillRect(-6, -40, 12, 80);
+    ctx.fillRect(-30, -6, 60, 12);
+    ctx.fillRect(-34, -10, 8, 20);
+    ctx.fillRect(26, -10, 8, 20);
+    ctx.fillRect(-10, -44, 20, 8);
+    ctx.fillRect(-10, 36, 20, 8);
+    ctx.fillStyle = '#b8960a';
+    ctx.fillRect(-4, -4, 8, 8);
+    ctx.restore();
+
+    // Glow
+    const glowAlpha = 0.15 + Math.sin(frameCount * 0.03) * 0.1;
+    ctx.fillStyle = `rgba(255, 215, 0, ${glowAlpha})`;
+    ctx.beginPath();
+    ctx.arc(400, 150, 70, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Title
+    ctx.fillStyle = PAL.gold;
+    ctx.font = '28px "Press Start 2P"';
+    ctx.textAlign = 'center';
+    ctx.fillText("REFORMERS", 400, 270);
+    ctx.fillText("QUEST", 400, 310);
+
+    ctx.fillStyle = '#a0a0c0';
+    ctx.font = '9px "Press Start 2P"';
+    ctx.fillText('Ethiopian Christianity & the Protestant Reformation', 400, 350);
+
+    // Scroll icon animation
+    const scrollBob = Math.sin(frameCount * 0.06) * 5;
+    ctx.fillStyle = PAL.parchment;
+    ctx.fillRect(370, 380 + scrollBob, 60, 30);
+    ctx.fillStyle = '#c8a878';
+    ctx.fillRect(370, 378 + scrollBob, 60, 4);
+    ctx.fillRect(370, 408 + scrollBob, 60, 4);
+    ctx.fillStyle = PAL.ink;
+    ctx.fillRect(380, 388 + scrollBob, 40, 2);
+    ctx.fillRect(380, 394 + scrollBob, 35, 2);
+    ctx.fillRect(380, 400 + scrollBob, 38, 2);
+
+    // Blink prompt
+    if (Math.floor(titleBlink / 30) % 2 === 0) {
+        ctx.fillStyle = '#6060a0';
+        ctx.font = '10px "Press Start 2P"';
+        ctx.fillText('PRESS SPACE OR ENTER', 400, 480);
+    }
+
+    ctx.fillStyle = '#404060';
+    ctx.font = '8px "Press Start 2P"';
+    ctx.fillText('ARROWS: Move    SPACE: Interact', 400, 560);
+
+    ctx.textAlign = 'left';
+}
+
+// ── Prologue ──
+function updatePrologue() {
+    prologueTimer++;
+
+    const slide = prologueSlides[prologueStep];
+    if (!prologueComplete) {
+        prologueTextTimer++;
+        if (prologueTextTimer % 2 === 0) {
+            prologueTextIndex++;
+            if (prologueTextIndex >= slide.text.length) {
+                prologueComplete = true;
+            }
+        }
+    }
+
+    if (keyJustPressed(' ') || keyJustPressed('Enter')) {
+        if (!prologueComplete) {
+            prologueTextIndex = slide.text.length;
+            prologueComplete = true;
+        } else {
+            prologueStep++;
+            if (prologueStep >= prologueSlides.length) {
+                // Start game
+                gameState = 'overworld';
+                const map = maps[playerData.currentMap];
+                playerData.x = map.playerStart.x;
+                playerData.y = map.playerStart.y;
+                playerData.targetX = playerData.x;
+                playerData.targetY = playerData.y;
+                return;
+            }
+            prologueTextIndex = 0;
+            prologueTextTimer = 0;
+            prologueComplete = false;
+            prologueTimer = 0;
+        }
+    }
+}
+
+function drawPrologue() {
+    const slide = prologueSlides[prologueStep];
+
+    // Background based on theme
+    const bgColors = {
+        dark: ['#0a0a1a', '#1a1a3a'],
+        red: ['#1a0a0a', '#3a1a1a'],
+        gold: ['#1a1a0a', '#3a3a1a'],
+        green: ['#0a1a0a', '#1a3a1a'],
+        blue: ['#0a0a1a', '#1a1a4a']
+    };
+    const [c1, c2] = bgColors[slide.bg] || bgColors.dark;
+    const grad = ctx.createLinearGradient(0, 0, 0, 600);
+    grad.addColorStop(0, c1);
+    grad.addColorStop(1, c2);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 800, 600);
+
+    // Ambient particles
+    for (let i = 0; i < 20; i++) {
+        const px = (i * 41 + frameCount * 0.5) % 800;
+        const py = (i * 31 + Math.sin(frameCount * 0.01 + i) * 30) % 600;
+        const themeColors = { dark: '150,150,200', red: '200,100,100', gold: '255,215,0', green: '100,200,100', blue: '100,150,255' };
+        ctx.fillStyle = `rgba(${themeColors[slide.bg] || '150,150,200'}, ${0.2 + Math.sin(frameCount * 0.03 + i) * 0.15})`;
+        ctx.fillRect(px, py, 2, 2);
+    }
+
+    // Scene illustrations
+    drawPrologueScene(slide.bg, prologueStep);
+
+    // Slide counter
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.font = '8px "Press Start 2P"';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${prologueStep + 1} / ${prologueSlides.length}`, 400, 30);
+
+    // Title
+    const titleAlpha = Math.min(1, prologueTimer / 30);
+    ctx.fillStyle = `rgba(255, 215, 0, ${titleAlpha})`;
+    ctx.font = '16px "Press Start 2P"';
+    ctx.fillText(slide.title, 400, 340);
+
+    // Text box
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.fillRect(60, 370, 680, 150);
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.4)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(60, 370, 680, 150);
+
+    const displayText = slide.text.substring(0, prologueTextIndex);
+    ctx.fillStyle = '#d0d0e0';
+    ctx.font = '9px "Press Start 2P"';
+    ctx.textAlign = 'left';
+    wrapText(displayText, 80, 398, 620, 20);
+
+    // Continue prompt
+    if (prologueComplete && Math.floor(frameCount / 20) % 2 === 0) {
+        ctx.fillStyle = '#8080b0';
+        ctx.font = '8px "Press Start 2P"';
+        ctx.textAlign = 'center';
+        ctx.fillText(prologueStep === prologueSlides.length - 1 ? 'PRESS SPACE TO BEGIN YOUR QUEST' : 'PRESS SPACE TO CONTINUE', 400, 540);
+    }
+
+    // Progress dots
+    for (let i = 0; i < prologueSlides.length; i++) {
+        ctx.fillStyle = i === prologueStep ? PAL.gold : 'rgba(255,255,255,0.3)';
+        ctx.fillRect(370 + i * 16, 570, i === prologueStep ? 10 : 6, i === prologueStep ? 6 : 4);
+    }
+
+    ctx.textAlign = 'left';
+}
+
+function drawPrologueScene(bg, step) {
+    ctx.save();
+    ctx.translate(400, 180);
+
+    switch (step) {
+        case 0: // Catholic Church power
+            // Big imposing church
+            ctx.fillStyle = '#4a4a5a';
+            ctx.fillRect(-60, -40, 120, 80);
+            ctx.fillStyle = '#5a5a6a';
+            ctx.fillRect(-50, -60, 100, 30);
+            ctx.fillStyle = '#6a6a7a';
+            ctx.fillRect(-20, -90, 40, 40);
+            // Pope crown
+            ctx.fillStyle = PAL.gold;
+            ctx.fillRect(-8, -100, 16, 12);
+            ctx.fillRect(-4, -108, 8, 10);
+            // Cross on top
+            ctx.fillRect(-2, -120, 4, 16);
+            ctx.fillRect(-8, -112, 16, 4);
+            // Small people at base
+            for (let i = -3; i <= 3; i++) {
+                ctx.fillStyle = '#808090';
+                ctx.fillRect(i * 15 - 3, 40, 6, 10);
+                ctx.fillStyle = '#a0a0b0';
+                ctx.fillRect(i * 15 - 2, 34, 4, 6);
+            }
+            break;
+
+        case 1: // Corruption
+            // Coins / indulgences
+            for (let i = 0; i < 8; i++) {
+                const cx = Math.sin(i * 0.8 + frameCount * 0.02) * 80;
+                const cy = Math.cos(i * 1.1 + frameCount * 0.02) * 40 - 20;
+                ctx.fillStyle = PAL.gold;
+                ctx.beginPath();
+                ctx.arc(cx, cy, 10, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#b8960a';
+                ctx.fillRect(cx - 3, cy - 4, 6, 2);
+            }
+            // Sad figures
+            ctx.fillStyle = '#606060';
+            ctx.fillRect(-40, 30, 8, 14);
+            ctx.fillRect(30, 30, 8, 14);
+            ctx.fillStyle = '#808080';
+            ctx.fillRect(-39, 24, 6, 6);
+            ctx.fillRect(31, 24, 6, 6);
+            break;
+
+        case 2: // Luther nailing theses
+            // Church door
+            ctx.fillStyle = '#5a3a1a';
+            ctx.fillRect(-40, -50, 80, 100);
+            ctx.fillStyle = '#4a2a0a';
+            ctx.fillRect(-35, -45, 70, 90);
+            // Paper on door
+            ctx.fillStyle = '#f5f5dc';
+            ctx.fillRect(-15, -30, 30, 40);
+            ctx.fillStyle = '#1a1a1a';
+            for (let l = 0; l < 6; l++) {
+                ctx.fillRect(-10, -24 + l * 6, 20, 1);
+            }
+            // Luther figure
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(50, -10, 12, 18);
+            ctx.fillStyle = '#f0c8a0';
+            ctx.fillRect(52, -18, 8, 10);
+            // Hammer
+            ctx.fillStyle = '#8a7a6a';
+            ctx.fillRect(44, -12, 3, 14);
+            ctx.fillStyle = '#5a4a3a';
+            ctx.fillRect(40, -14, 8, 5);
+            break;
+
+        case 3: // Ethiopia
+            // Ethiopian church (cross-shaped from above)
+            ctx.fillStyle = '#c4a060';
+            ctx.fillRect(-15, -60, 30, 80);
+            ctx.fillRect(-40, -30, 80, 30);
+            // Cross on top
+            ctx.fillStyle = PAL.gold;
+            ctx.fillRect(-3, -72, 6, 16);
+            ctx.fillRect(-10, -66, 20, 4);
+            // Ethiopian figures celebrating
+            const colors = ['#8b0000', '#daa520', '#f5f5dc', '#4a3080'];
+            for (let i = 0; i < 4; i++) {
+                const fx = -50 + i * 35;
+                const bob = Math.sin(frameCount * 0.08 + i) * 3;
+                ctx.fillStyle = colors[i];
+                ctx.fillRect(fx, 30 + bob, 10, 16);
+                ctx.fillStyle = '#8d5524';
+                ctx.fillRect(fx + 1, 22 + bob, 8, 8);
+            }
+            break;
+
+        case 4: // Your quest
+            // Scholar with scroll
+            ctx.fillStyle = '#2050a0';
+            ctx.fillRect(-6, -10, 12, 18);
+            ctx.fillStyle = '#f0c8a0';
+            ctx.fillRect(-4, -20, 8, 12);
+            ctx.fillStyle = '#4a2010';
+            ctx.fillRect(-5, -24, 10, 6);
+            // Satchel with scroll
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(8, -4, 8, 10);
+            ctx.fillStyle = PAL.parchment;
+            ctx.fillRect(10, -8, 4, 6);
+            // Path stretching ahead
+            ctx.fillStyle = PAL.path;
+            ctx.fillRect(-10, 20, 20, 6);
+            for (let i = 1; i < 8; i++) {
+                const w = 20 + i * 10;
+                ctx.fillStyle = `rgba(196, 163, 90, ${1 - i * 0.12})`;
+                ctx.fillRect(-w / 2, 20 + i * 10, w, 6);
+            }
+            // Arrow pointing forward
+            const arrowBob = Math.sin(frameCount * 0.08) * 4;
+            ctx.fillStyle = PAL.gold;
+            ctx.fillRect(-2, 90 + arrowBob, 4, 15);
+            ctx.fillRect(-6, 100 + arrowBob, 12, 4);
+            break;
+    }
+
+    ctx.restore();
+}
+
+// ── Overworld ──
+function updateOverworld() {
+    const map = maps[playerData.currentMap];
+
+    if (playerData.moving) {
+        playerData.moveProgress += 0.15;
+        if (playerData.moveProgress >= 1) {
+            playerData.x = playerData.targetX;
+            playerData.y = playerData.targetY;
+            playerData.moving = false;
+            playerData.moveProgress = 0;
+
+            for (const warp of (map.warps || [])) {
+                if (playerData.x === warp.x && playerData.y === warp.y) {
+                    if (warp.requires && !playerData.defeatedBosses.includes(warp.requires)) {
+                        startDialogue([{
+                            name: 'System',
+                            text: 'The path is blocked! Defeat the Guardian Spirit to proceed.'
+                        }]);
+                        playerData.x = warp.x + (warp.target === 'lalibela' || warp.target === 'wittenberg' ? -1 : 1);
+                        playerData.y = warp.y;
+                        playerData.targetX = playerData.x;
+                        playerData.targetY = playerData.y;
+                        return;
+                    }
+                    startMapTransition(warp.target, warp.tx, warp.ty);
+                    return;
+                }
+            }
+        }
+    } else {
+        let dx = 0, dy = 0;
+        if (keys['ArrowUp']) { dy = -1; playerData.dir = 'up'; }
+        else if (keys['ArrowDown']) { dy = 1; playerData.dir = 'down'; }
+        else if (keys['ArrowLeft']) { dx = -1; playerData.dir = 'left'; }
+        else if (keys['ArrowRight']) { dx = 1; playerData.dir = 'right'; }
+
+        if (dx !== 0 || dy !== 0) {
+            const nx = playerData.x + dx;
+            const ny = playerData.y + dy;
+            if (!isSolid(playerData.currentMap, nx, ny)) {
+                playerData.targetX = nx;
+                playerData.targetY = ny;
+                playerData.moving = true;
+                playerData.moveProgress = 0;
+            }
+        }
+
+        // Interact
+        if (keyJustPressed(' ') || keyJustPressed('Enter')) {
+            const facingX = playerData.x + (playerData.dir === 'left' ? -1 : playerData.dir === 'right' ? 1 : 0);
+            const facingY = playerData.y + (playerData.dir === 'up' ? -1 : playerData.dir === 'down' ? 1 : 0);
+
+            for (const npc of map.npcs) {
+                if (npc.x === facingX && npc.y === facingY) {
+                    // Turn NPC to face player
+                    if (playerData.dir === 'up') npc.dir = 'down';
+                    else if (playerData.dir === 'down') npc.dir = 'up';
+                    else if (playerData.dir === 'left') npc.dir = 'right';
+                    else npc.dir = 'left';
+
+                    // Dynamic dialogue for guard
+                    let dialogueLines;
+                    if (npc.id === 'guard_aksum') {
+                        if (!playerData.hasScroll) {
+                            dialogueLines = [
+                                { name: npc.name, text: 'The road to Lalibela is dangerous, young scholar.' },
+                                { name: npc.name, text: 'Speak to Elder Abba Salama first — he has been asking for you.' },
+                                { name: npc.name, text: 'And learn from our monks before you attempt the journey!' }
+                            ];
+                            startDialogue(dialogueLines);
+                        } else {
+                            dialogueLines = [
+                                { name: npc.name, text: 'You carry the sacred scroll! Then you may attempt the passage.' },
+                                { name: npc.name, text: 'But first, prove you have learned from the monks of Aksum!' },
+                                { name: npc.name, text: 'Defeat the Guardian Spirit in battle to earn passage to Lalibela!' }
+                            ];
+                            startDialogue(dialogueLines);
+                        }
+                    } else {
+                        dialogueLines = npc.dialogue.map(text => ({ name: npc.name, text }));
+
+                        if (npc.quiz) {
+                            const quizKey = npc.isBoss ? 'quiz3' : (playerData.currentMap === 'aksum' ? 'quiz1' : 'quiz2');
+                            if (playerData.defeatedBosses.includes(quizKey)) {
+                                startDialogue([{ name: npc.name, text: npc.isBoss ? 'You have proven yourself a true scholar! Your diploma awaits in the great hall.' : 'You have already proven your knowledge here. Continue your journey, young scholar!' }]);
+                            } else {
+                                // NPCs with walk + quiz: walk first, then quiz after walk dialogue
+                                if (npc.walkAfterDialogue && !npc._hasWalked) {
+                                    const walkData = npc.walkAfterDialogue;
+                                    const quizCb = () => startBattle(quizKey);
+                                    startDialogue(dialogueLines, () => {
+                                        npc._hasWalked = true;
+                                        startNpcWalk(npc, walkData.steps, walkData.dialogue.concat([
+                                            { name: npc.name, text: 'Now — prove your knowledge in battle!' }
+                                        ]));
+                                        // After walk dialogue ends, we need to trigger quiz
+                                        npc._pendingQuiz = quizKey;
+                                    });
+                                } else if (npc._pendingQuiz) {
+                                    startBattle(npc._pendingQuiz);
+                                    npc._pendingQuiz = null;
+                                } else {
+                                    const callback = () => startBattle(quizKey);
+                                    if (npc.questGiver && npc.onComplete && !playerData.hasScroll) {
+                                        startDialogue(dialogueLines, () => { npc.onComplete(); });
+                                    } else {
+                                        startDialogue(dialogueLines, callback);
+                                    }
+                                }
+                            }
+                        } else if (npc.questGiver && npc.onComplete && !playerData.hasScroll) {
+                            startDialogue(dialogueLines, () => { npc.onComplete(); });
+                        } else if (npc.questGiver && playerData.hasScroll) {
+                            startDialogue([
+                                { name: npc.name, text: 'You carry the scroll! Now go — speak to the monks, learn all you can, then head to Lalibela!' },
+                                { name: npc.name, text: 'The knowledge you gather here will be crucial when you finally reach Martin Luther.' }
+                            ]);
+                        } else if (npc.walkAfterDialogue && !npc._hasWalked) {
+                            // Non-quiz NPCs with walks
+                            const walkData = npc.walkAfterDialogue;
+                            startDialogue(dialogueLines, () => {
+                                npc._hasWalked = true;
+                                startNpcWalk(npc, walkData.steps, walkData.dialogue);
+                            });
+                        } else {
+                            startDialogue(dialogueLines);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+}
+
+function drawOverworld() {
+    const map = maps[playerData.currentMap];
+
+    const interpX = playerData.x + (playerData.targetX - playerData.x) * playerData.moveProgress;
+    const interpY = playerData.y + (playerData.targetY - playerData.y) * playerData.moveProgress;
+    const camX = Math.max(0, Math.min(map.width * TILE - 800, interpX * TILE - 400 + TILE / 2));
+    const camY = Math.max(0, Math.min(map.height * TILE - 600, interpY * TILE - 300 + TILE / 2));
+
+    ctx.save();
+    if (screenShake > 0) {
+        ctx.translate(Math.random() * screenShake - screenShake / 2, Math.random() * screenShake - screenShake / 2);
+        screenShake *= 0.9;
+        if (screenShake < 0.5) screenShake = 0;
+    }
+    ctx.translate(-camX, -camY);
+
+    const startCol = Math.floor(camX / TILE);
+    const startRow = Math.floor(camY / TILE);
+    const endCol = Math.min(map.width, startCol + 26);
+    const endRow = Math.min(map.height, startRow + 20);
+
+    for (let y = startRow; y < endRow; y++) {
+        for (let x = startCol; x < endCol; x++) {
+            drawTile(x, y, map.tiles[y][x], playerData.currentMap);
+        }
+    }
+
+    // Warp indicators
+    (map.warps || []).forEach(warp => {
+        const wx = warp.x * TILE;
+        const wy = warp.y * TILE;
+        const pulse = Math.sin(frameCount * 0.08) * 0.3 + 0.5;
+        ctx.fillStyle = `rgba(255, 215, 0, ${pulse * 0.3})`;
+        ctx.fillRect(wx, wy, TILE, TILE);
+        ctx.fillStyle = `rgba(255, 215, 0, ${pulse})`;
+        const arrowDir = warp.target === 'aksum' ? -1 : 1;
+        const arrowX = arrowDir > 0 ? wx + 24 : wx + 4;
+        ctx.fillRect(arrowX, wy + 12, 8, 4);
+    });
+
+    // Draw NPCs
+    const walkInterp = getNpcWalkInterp();
+    map.npcs.forEach(npc => {
+        // Use interpolated position if this NPC is currently walking
+        let drawX = npc.x * TILE;
+        let drawY = npc.y * TILE;
+        let isWalking = false;
+        if (walkInterp && walkInterp.npc === npc) {
+            drawX = walkInterp.x * TILE;
+            drawY = walkInterp.y * TILE;
+            isWalking = true;
+        }
+
+        const bob = isWalking ? 0 : Math.sin(frameCount * 0.05 + npc.x * 3) * 2;
+        drawPixelChar(drawX, drawY, npc.dir, true, npc.colors, bob, isWalking);
+
+        // Name tag
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.font = '7px "Press Start 2P"';
+        const nameW = ctx.measureText(npc.name).width + 8;
+        ctx.fillRect(drawX + 16 - nameW / 2, drawY - 8, nameW, 12);
+        ctx.fillStyle = npc.isBoss ? '#ff8080' : npc.questGiver ? PAL.gold : '#fff';
+        ctx.textAlign = 'center';
+        ctx.fillText(npc.name, drawX + 16, drawY);
+        ctx.textAlign = 'left';
+
+        // Interaction indicator
+        const dist = Math.abs(playerData.x - npc.x) + Math.abs(playerData.y - npc.y);
+        if (dist <= 2) {
+            const indicBob = Math.sin(frameCount * 0.1) * 4;
+            ctx.fillStyle = npc.questGiver ? PAL.gold : '#ffffff';
+            // Exclamation mark for quest giver, speech bubble for others
+            if (npc.questGiver && !playerData.hasScroll) {
+                ctx.font = '10px "Press Start 2P"';
+                ctx.textAlign = 'center';
+                ctx.fillText('!', npc.x * TILE + 16, npc.y * TILE - 14 + indicBob);
+                ctx.textAlign = 'left';
+            } else {
+                ctx.fillRect(npc.x * TILE + 12, npc.y * TILE - 18 + indicBob, 8, 2);
+                ctx.fillRect(npc.x * TILE + 14, npc.y * TILE - 16 + indicBob, 4, 4);
+            }
+        }
+    });
+
+    // Draw player
+    const px = interpX * TILE;
+    const py = interpY * TILE;
+    const playerColors = { body: '#2050a0', skin: '#f0c8a0', hair: '#4a2010', legs: '#203060', shoes: '#402020', satchel: true };
+    drawPixelChar(px, py, playerData.dir, false, playerColors, 0, playerData.moving);
+
+    drawParticles();
+    ctx.restore();
+
+    drawHUD(map.name);
+}
+
+function drawHUD(mapName) {
+    // Top bar
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, 800, 36);
+    ctx.fillStyle = PAL.gold;
+    ctx.font = '10px "Press Start 2P"';
+    ctx.textAlign = 'left';
+    ctx.fillText(mapName, 10, 24);
+
+    // Level & XP
+    ctx.fillStyle = '#a0a0d0';
+    ctx.textAlign = 'right';
+    ctx.fillText(`LV ${playerData.level}  XP ${playerData.xp}/${playerData.level * 50}`, 790, 24);
+
+    // Score
+    ctx.fillStyle = '#70d070';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${playerData.correctAnswers}/${playerData.questionsAnswered} correct`, 400, 24);
+    ctx.textAlign = 'left';
+
+    // Quest tracker
+    const bosses = playerData.defeatedBosses;
+    const questY = 46;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(580, questY, 210, 60);
+    ctx.strokeStyle = PAL.textBorder;
+    ctx.strokeRect(580, questY, 210, 60);
+    ctx.fillStyle = '#8888bb';
+    ctx.font = '7px "Press Start 2P"';
+    ctx.fillText('SCROLL QUEST', 590, questY + 14);
+    ctx.fillStyle = playerData.hasScroll ? '#70d070' : '#606080';
+    ctx.fillText(playerData.hasScroll ? '✓ Scroll received' : '○ Get scroll', 590, questY + 28);
+    ctx.fillStyle = bosses.includes('quiz1') ? '#70d070' : '#606080';
+    ctx.fillText(bosses.includes('quiz1') ? '✓ Aksum' : '○ Aksum', 590, questY + 40);
+    ctx.fillStyle = bosses.includes('quiz2') ? '#70d070' : '#606080';
+    ctx.fillText(bosses.includes('quiz2') ? '✓ Lalibela' : '○ Lalibela', 680, questY + 40);
+    ctx.fillStyle = bosses.includes('quiz3') ? '#70d070' : '#606080';
+    ctx.fillText(bosses.includes('quiz3') ? '✓ Luther' : '○ Luther', 590, questY + 52);
+}
+
+// ── Dialogue System ──
+function startDialogue(lines, callback = null) {
+    gameState = 'dialogue';
+    currentDialogue = lines;
+    dialogueIndex = 0;
+    dialogueCharIndex = 0;
+    dialogueTimer = 0;
+    dialogueComplete = false;
+    dialogueCallback = callback;
+}
+
+function updateDialogue() {
+    if (!currentDialogue) return;
+
+    const line = currentDialogue[dialogueIndex];
+    if (!dialogueComplete) {
+        dialogueTimer++;
+        if (dialogueTimer % 2 === 0) {
+            dialogueCharIndex++;
+            if (dialogueCharIndex >= line.text.length) {
+                dialogueComplete = true;
+            }
+        }
+    }
+
+    if (keyJustPressed(' ') || keyJustPressed('Enter') || keyJustPressed('z')) {
+        if (!dialogueComplete) {
+            dialogueCharIndex = line.text.length;
+            dialogueComplete = true;
+        } else {
+            dialogueIndex++;
+            if (dialogueIndex >= currentDialogue.length) {
+                gameState = 'overworld';
+                currentDialogue = null;
+                if (dialogueCallback) {
+                    dialogueCallback();
+                    dialogueCallback = null;
+                }
+                return;
+            }
+            dialogueCharIndex = 0;
+            dialogueTimer = 0;
+            dialogueComplete = false;
+        }
+    }
+}
+
+function drawDialogue() {
+    if (!currentDialogue) return;
+    const line = currentDialogue[dialogueIndex];
+    const displayText = line.text.substring(0, dialogueCharIndex);
+
+    const boxY = 440;
+    const boxH = 140;
+
+    ctx.fillStyle = PAL.textBg;
+    ctx.fillRect(20, boxY, 760, boxH);
+    ctx.strokeStyle = PAL.textBorder;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(20, boxY, 760, boxH);
+
+    // Name plate
+    ctx.fillStyle = PAL.textBorder;
+    const nameWidth = ctx.measureText(line.name).width * 1.2 + 30;
+    ctx.fillRect(30, boxY - 16, nameWidth, 24);
+    ctx.fillStyle = PAL.gold;
+    ctx.font = '10px "Press Start 2P"';
+    ctx.fillText(line.name, 42, boxY);
+
+    // Text
+    ctx.fillStyle = '#e0e0e0';
+    ctx.font = '11px "Press Start 2P"';
+    wrapText(displayText, 42, boxY + 30, 720, 22);
+
+    // Continue indicator
+    if (dialogueComplete) {
+        const blinkOn = Math.floor(frameCount / 15) % 2 === 0;
+        if (blinkOn) {
+            ctx.fillStyle = PAL.gold;
+            ctx.fillRect(740, boxY + boxH - 20, 8, 4);
+            ctx.fillRect(744, boxY + boxH - 16, 4, 4);
+        }
+    }
+
+    // Page indicator
+    ctx.fillStyle = '#606090';
+    ctx.font = '8px "Press Start 2P"';
+    ctx.textAlign = 'right';
+    ctx.fillText(`${dialogueIndex + 1}/${currentDialogue.length}`, 760, boxY + boxH - 8);
+    ctx.textAlign = 'left';
+}
+
+function wrapText(text, x, y, maxWidth, lineHeight) {
+    const words = text.split(' ');
+    let line = '';
+    let currentY = y;
+
+    words.forEach(word => {
+        const testLine = line + word + ' ';
+        const metrics = ctx.measureText(testLine);
+        if (metrics.width > maxWidth && line !== '') {
+            ctx.fillText(line.trim(), x, currentY);
+            line = word + ' ';
+            currentY += lineHeight;
+        } else {
+            line = testLine;
+        }
+    });
+    ctx.fillText(line.trim(), x, currentY);
+}
+
+// ── Battle System ──
+function startBattle(quizKey) {
+    const quiz = quizSets[quizKey];
+    gameState = 'battleIntro';
+    battleState = {
+        quizKey,
+        enemy: quiz.enemy,
+        enemyColors: quiz.enemyColors,
+        isBoss: quiz.isBoss || false,
+        questions: [...quiz.questions],
+        currentQuestion: 0,
+        selectedAnswer: 0,
+        playerHp: playerData.hp,
+        playerMaxHp: playerData.maxHp,
+        enemyHp: 100,
+        enemyMaxHp: 100,
+        phase: 'intro',
+        introTimer: 0,
+        resultTimer: 0,
+        correct: false,
+        showExplain: false,
+        explainText: '',
+        flashTimer: 0,
+        won: false,
+        battleLog: '',
+        answerLocked: false
+    };
+}
+
+function updateBattle() {
+    if (!battleState) return;
+
+    if (gameState === 'battleIntro') {
+        battleState.introTimer++;
+        if (battleState.introTimer > 90) {
+            gameState = 'battle';
+            battleState.phase = 'question';
+        }
+        return;
+    }
+
+    switch (battleState.phase) {
+        case 'question':
+            if (!battleState.answerLocked) {
+                if (keyJustPressed('ArrowUp')) battleState.selectedAnswer = (battleState.selectedAnswer + 3) % 4;
+                if (keyJustPressed('ArrowDown')) battleState.selectedAnswer = (battleState.selectedAnswer + 1) % 4;
+                if (keyJustPressed('ArrowLeft')) battleState.selectedAnswer = battleState.selectedAnswer < 2 ? battleState.selectedAnswer + 2 : battleState.selectedAnswer - 2;
+                if (keyJustPressed('ArrowRight')) battleState.selectedAnswer = battleState.selectedAnswer < 2 ? battleState.selectedAnswer + 2 : battleState.selectedAnswer - 2;
+                if (keyJustPressed(' ') || keyJustPressed('Enter') || keyJustPressed('z')) {
+                    const q = battleState.questions[battleState.currentQuestion];
+                    battleState.correct = battleState.selectedAnswer === q.correct;
+                    battleState.answerLocked = true;
+                    battleState.phase = 'answered';
+                    battleState.flashTimer = 30;
+                    battleState.explainText = q.explain;
+                    playerData.questionsAnswered++;
+
+                    if (battleState.correct) {
+                        playerData.correctAnswers++;
+                        battleState.enemyHp -= battleState.isBoss ? 17 : 25;
+                        playerData.xp += 15;
+                        battleState.battleLog = 'SUPER EFFECTIVE! Your knowledge strikes true!';
+                        screenShake = 8;
+                        spawnParticles(580, 200, PAL.gold, 15);
+                    } else {
+                        battleState.playerHp -= 15;
+                        playerData.hp = battleState.playerHp;
+                        battleState.battleLog = 'Incorrect... You take damage!';
+                        screenShake = 5;
+                        spawnParticles(200, 350, '#ff4040', 10);
+                    }
+                }
+            }
+            break;
+
+        case 'answered':
+            battleState.flashTimer--;
+            if (battleState.flashTimer <= 0) {
+                battleState.phase = 'result';
+                battleState.resultTimer = 0;
+                battleState.showExplain = true;
+            }
+            break;
+
+        case 'result':
+            battleState.resultTimer++;
+            if (keyJustPressed(' ') || keyJustPressed('Enter') || keyJustPressed('z')) {
+                if (battleState.enemyHp <= 0) {
+                    battleState.won = true;
+                    playerData.defeatedBosses.push(battleState.quizKey);
+                    playerData.xp += battleState.isBoss ? 100 : 50;
+                    checkLevelUp();
+
+                    if (battleState.isBoss) {
+                        // Go to diploma!
+                        gameState = 'diploma';
+                        diplomaTimer = 0;
+                        diplomaPhase = 0;
+                    } else {
+                        gameState = 'victory';
+                        battleState.resultTimer = 0;
+                    }
+                } else if (battleState.playerHp <= 0) {
+                    playerData.hp = playerData.maxHp;
+                    battleState = null;
+                    gameState = 'overworld';
+                    startDialogue([{ name: 'System', text: 'You were defeated... Study more and try again!' }]);
+                } else {
+                    battleState.currentQuestion++;
+                    if (battleState.currentQuestion >= battleState.questions.length) {
+                        battleState.currentQuestion = 0;
+                        battleState.questions.forEach(q => {
+                            const correctText = q.options[q.correct];
+                            for (let i = q.options.length - 1; i > 0; i--) {
+                                const j = Math.floor(Math.random() * (i + 1));
+                                [q.options[i], q.options[j]] = [q.options[j], q.options[i]];
+                            }
+                            q.correct = q.options.indexOf(correctText);
+                        });
+                    }
+                    battleState.selectedAnswer = 0;
+                    battleState.phase = 'question';
+                    battleState.answerLocked = false;
+                    battleState.showExplain = false;
+                    battleState.battleLog = '';
+                }
+            }
+            break;
+    }
+}
+
+function drawBattle() {
+    if (!battleState) return;
+
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, 600);
+    bgGrad.addColorStop(0, '#1a1030');
+    bgGrad.addColorStop(1, '#0a0820');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, 800, 600);
+
+    // Battle floor lines
+    ctx.fillStyle = 'rgba(80, 60, 120, 0.3)';
+    for (let i = 0; i < 20; i++) {
+        const lineY = 300 + i * 15 + Math.sin(frameCount * 0.02 + i) * 3;
+        ctx.fillRect(0, lineY, 800, 2);
+    }
+
+    // Energy particles
+    for (let i = 0; i < 15; i++) {
+        const px = (i * 57 + frameCount * 1.5) % 800;
+        const py = 200 + Math.sin(frameCount * 0.03 + i * 2) * 100;
+        ctx.fillStyle = `rgba(150, 100, 255, ${0.3 + Math.sin(frameCount * 0.05 + i) * 0.2})`;
+        ctx.fillRect(px, py, 3, 3);
+    }
+
+    if (gameState === 'battleIntro') {
+        const progress = battleState.introTimer / 90;
+        const slideIn = Math.min(1, progress * 2);
+
+        const enemyX = 800 - slideIn * 250;
+        drawPixelChar(enemyX, 120, 'left', true, battleState.enemyColors, Math.sin(frameCount * 0.05) * 3, false);
+
+        const playerX = -50 + slideIn * 200;
+        drawPixelChar(playerX, 300, 'right', false, { body: '#2050a0', skin: '#f0c8a0', hair: '#4a2010', legs: '#203060', shoes: '#402020', satchel: true }, 0, false);
+
+        if (progress > 0.5) {
+            const scale = Math.min(1, (progress - 0.5) * 4);
+            ctx.save();
+            ctx.translate(400, 240);
+            ctx.scale(scale, scale);
+            ctx.fillStyle = PAL.gold;
+            ctx.font = '40px "Press Start 2P"';
+            ctx.textAlign = 'center';
+            ctx.fillText('VS', 0, 15);
+            ctx.restore();
+        }
+
+        if (progress > 0.3) {
+            ctx.fillStyle = battleState.isBoss ? '#ff4040' : PAL.purple;
+            ctx.font = battleState.isBoss ? '16px "Press Start 2P"' : '12px "Press Start 2P"';
+            ctx.textAlign = 'center';
+            ctx.fillText(battleState.enemy, 400, 80);
+            if (battleState.isBoss) {
+                ctx.fillStyle = PAL.gold;
+                ctx.font = '10px "Press Start 2P"';
+                ctx.fillText('⭐ FINAL BOSS ⭐', 400, 100);
+            }
+        }
+        ctx.textAlign = 'left';
+        return;
+    }
+
+    ctx.save();
+    if (screenShake > 0) {
+        ctx.translate(Math.random() * screenShake - screenShake / 2, Math.random() * screenShake - screenShake / 2);
+    }
+
+    // Enemy platform
+    ctx.fillStyle = 'rgba(100, 80, 150, 0.4)';
+    ctx.beginPath();
+    ctx.ellipse(580, 220, 80, 20, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const enemyBob = Math.sin(frameCount * 0.05) * 3;
+    const enemyShake = battleState.phase === 'answered' && battleState.correct && battleState.flashTimer > 15 ? (Math.random() - 0.5) * 10 : 0;
+    if (battleState.enemyHp > 0) {
+        drawPixelChar(560 + enemyShake, 140 + enemyBob, 'left', true, battleState.enemyColors, 0, false);
+    }
+
+    // Player platform
+    ctx.fillStyle = 'rgba(50, 80, 150, 0.4)';
+    ctx.beginPath();
+    ctx.ellipse(200, 400, 80, 20, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const playerShake = battleState.phase === 'answered' && !battleState.correct && battleState.flashTimer > 15 ? (Math.random() - 0.5) * 8 : 0;
+    drawPixelChar(180 + playerShake, 320, 'right', false, { body: '#2050a0', skin: '#f0c8a0', hair: '#4a2010', legs: '#203060', shoes: '#402020', satchel: true }, 0, false);
+
+    ctx.restore();
+
+    // HP bars
+    drawHpBar(480, 80, 250, 'Enemy', battleState.enemyHp, battleState.enemyMaxHp, battleState.enemy);
+    drawHpBar(20, 350, 250, 'You', battleState.playerHp, battleState.playerMaxHp, playerData.name);
+
+    // Battle log
+    if (battleState.battleLog) {
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(20, 280, 760, 30);
+        ctx.fillStyle = battleState.correct ? '#70ff70' : '#ff7070';
+        ctx.font = '10px "Press Start 2P"';
+        ctx.textAlign = 'center';
+        ctx.fillText(battleState.battleLog, 400, 300);
+        ctx.textAlign = 'left';
+    }
+
+    // Question area
+    if (battleState.phase === 'question' || battleState.phase === 'answered') {
+        const q = battleState.questions[battleState.currentQuestion];
+
+        ctx.fillStyle = 'rgba(20, 15, 40, 0.95)';
+        ctx.fillRect(20, 430, 760, 160);
+        ctx.strokeStyle = PAL.textBorder;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(20, 430, 760, 160);
+
+        ctx.fillStyle = '#e0e0ff';
+        ctx.font = '10px "Press Start 2P"';
+        wrapText(q.q, 40, 456, 720, 18);
+
+        for (let i = 0; i < 4; i++) {
+            const col = i < 2 ? 0 : 1;
+            const row = i % 2;
+            const ax = 40 + col * 370;
+            const ay = 500 + row * 35;
+
+            let bgColor = 'rgba(40, 30, 70, 0.8)';
+            let textColor = '#c0c0e0';
+
+            if (battleState.phase === 'answered') {
+                if (i === q.correct) {
+                    bgColor = 'rgba(0, 150, 0, 0.6)';
+                    textColor = '#70ff70';
+                } else if (i === battleState.selectedAnswer && !battleState.correct) {
+                    bgColor = 'rgba(150, 0, 0, 0.6)';
+                    textColor = '#ff7070';
+                }
+            } else if (i === battleState.selectedAnswer) {
+                bgColor = 'rgba(80, 60, 150, 0.8)';
+                textColor = PAL.gold;
+            }
+
+            ctx.fillStyle = bgColor;
+            ctx.fillRect(ax - 5, ay - 14, 350, 28);
+
+            if (i === battleState.selectedAnswer && battleState.phase === 'question') {
+                ctx.strokeStyle = PAL.gold;
+                ctx.strokeRect(ax - 5, ay - 14, 350, 28);
+            }
+
+            ctx.fillStyle = textColor;
+            ctx.font = '9px "Press Start 2P"';
+            const label = ['A', 'B', 'C', 'D'][i];
+            ctx.fillText(`${label}. ${q.options[i]}`, ax + 5, ay + 2);
+        }
+
+        ctx.fillStyle = '#606090';
+        ctx.font = '8px "Press Start 2P"';
+        ctx.textAlign = 'right';
+        ctx.fillText(`Q${battleState.currentQuestion + 1}/${battleState.questions.length}`, 770, 446);
+        ctx.textAlign = 'left';
+    }
+
+    // Explanation
+    if (battleState.showExplain && battleState.phase === 'result') {
+        ctx.fillStyle = 'rgba(20, 15, 40, 0.95)';
+        ctx.fillRect(20, 430, 760, 160);
+        ctx.strokeStyle = battleState.correct ? '#30a030' : '#a03030';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(20, 430, 760, 160);
+
+        ctx.fillStyle = battleState.correct ? '#70ff70' : '#ff7070';
+        ctx.font = '12px "Press Start 2P"';
+        ctx.fillText(battleState.correct ? '✓ CORRECT!' : '✗ INCORRECT!', 40, 460);
+
+        ctx.fillStyle = '#c0c0e0';
+        ctx.font = '9px "Press Start 2P"';
+        wrapText(battleState.explainText, 40, 490, 720, 18);
+
+        if (Math.floor(frameCount / 20) % 2 === 0) {
+            ctx.fillStyle = '#8080b0';
+            ctx.font = '8px "Press Start 2P"';
+            ctx.textAlign = 'center';
+            ctx.fillText('Press SPACE to continue', 400, 580);
+            ctx.textAlign = 'left';
+        }
+    }
+
+    drawParticles();
+}
+
+function drawHpBar(x, y, width, label, hp, maxHp, name) {
+    ctx.fillStyle = 'rgba(20, 15, 40, 0.85)';
+    ctx.fillRect(x, y, width + 20, 50);
+    ctx.strokeStyle = '#4040a0';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, width + 20, 50);
+
+    ctx.fillStyle = '#e0e0ff';
+    ctx.font = '9px "Press Start 2P"';
+    ctx.fillText(name, x + 10, y + 16);
+
+    ctx.fillStyle = '#202040';
+    ctx.fillRect(x + 10, y + 24, width - 10, 12);
+
+    const hpRatio = Math.max(0, hp / maxHp);
+    const hpColor = hpRatio > 0.5 ? PAL.hpGreen : hpRatio > 0.25 ? PAL.hpYellow : PAL.hpRed;
+    ctx.fillStyle = hpColor;
+    ctx.fillRect(x + 10, y + 24, (width - 10) * hpRatio, 12);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '8px "Press Start 2P"';
+    ctx.textAlign = 'right';
+    ctx.fillText(`${Math.max(0, hp)}/${maxHp}`, x + width + 5, y + 44);
+    ctx.textAlign = 'left';
+}
+
+// ── Victory Screen (non-boss) ──
+function drawVictory() {
+    if (!battleState) return;
+
+    ctx.fillStyle = '#0a0820';
+    ctx.fillRect(0, 0, 800, 600);
+
+    for (let i = 0; i < 30; i++) {
+        const sx = (i * 27 + frameCount * 2) % 800;
+        const sy = (i * 43 + frameCount * 1) % 600;
+        const bright = Math.sin(frameCount * 0.1 + i) * 0.5 + 0.5;
+        ctx.fillStyle = `rgba(255, 215, 0, ${bright})`;
+        ctx.fillRect(sx, sy, 3, 3);
+    }
+
+    battleState.resultTimer++;
+    const t = Math.min(1, battleState.resultTimer / 60);
+
+    ctx.fillStyle = PAL.gold;
+    ctx.font = '24px "Press Start 2P"';
+    ctx.textAlign = 'center';
+    ctx.fillText('VICTORY!', 400, 80 * t + 60);
+
+    ctx.fillStyle = '#c0c0e0';
+    ctx.font = '12px "Press Start 2P"';
+    ctx.fillText(`${battleState.enemy} defeated!`, 400, 160);
+
+    ctx.fillStyle = PAL.xpBlue;
+    ctx.font = '14px "Press Start 2P"';
+    ctx.fillText(`+${battleState.isBoss ? 100 : 50} XP`, 400, 220);
+
+    ctx.fillStyle = '#a0a0d0';
+    ctx.font = '10px "Press Start 2P"';
+    ctx.fillText(`Level: ${playerData.level}`, 400, 280);
+    ctx.fillText(`Total Correct: ${playerData.correctAnswers}/${playerData.questionsAnswered}`, 400, 310);
+
+    ctx.fillStyle = PAL.gold;
+    ctx.font = '10px "Press Start 2P"';
+    ctx.fillText('KEY LEARNING:', 400, 370);
+
+    ctx.fillStyle = '#c0c0e0';
+    ctx.font = '9px "Press Start 2P"';
+    const learnings = {
+        quiz1: 'Ethiopian Christianity practiced communion in\nboth kinds, married clergy, and vernacular\nScripture for centuries before Luther.',
+        quiz2: 'Michael the Deacon\'s 1534 visit to Luther\nproved Ethiopian Christianity could thrive\nwithout a Pope, indulgences, or Purgatory.'
+    };
+    const lines = (learnings[battleState.quizKey] || '').split('\n');
+    lines.forEach((line, i) => {
+        ctx.fillText(line, 400, 400 + i * 20);
+    });
+
+    // Next area hint
+    if (battleState.resultTimer > 60) {
+        ctx.fillStyle = '#70d070';
+        ctx.font = '10px "Press Start 2P"';
+        const hints = {
+            quiz1: 'The path to Lalibela is now open! →',
+            quiz2: 'The road to Wittenberg awaits! →'
+        };
+        ctx.fillText(hints[battleState.quizKey] || '', 400, 480);
+    }
+
+    if (battleState.resultTimer > 60 && Math.floor(frameCount / 20) % 2 === 0) {
+        ctx.fillStyle = '#8080b0';
+        ctx.font = '8px "Press Start 2P"';
+        ctx.fillText('Press SPACE to continue', 400, 560);
+    }
+
+    ctx.textAlign = 'left';
+
+    if (battleState.resultTimer > 60 && (keyJustPressed(' ') || keyJustPressed('Enter'))) {
+        battleState = null;
+        gameState = 'overworld';
+        playerData.hp = playerData.maxHp;
+    }
+
+    drawParticles();
+}
+
+// ── Diploma Screen ──
+function updateDiploma() {
+    diplomaTimer++;
+
+    if (diplomaPhase === 0 && diplomaTimer > 60) {
+        diplomaPhase = 1; // Scroll unrolling
+    }
+    if (diplomaPhase === 1 && diplomaTimer > 120) {
+        diplomaPhase = 2; // Text appearing
+    }
+    if (diplomaPhase === 2 && diplomaTimer > 240) {
+        diplomaPhase = 3; // Fully visible
+    }
+}
+
+function drawDiploma() {
+    // Grand background
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, 600);
+    bgGrad.addColorStop(0, '#0a0820');
+    bgGrad.addColorStop(0.5, '#1a1040');
+    bgGrad.addColorStop(1, '#0a0820');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, 800, 600);
+
+    // Celebration particles
+    if (frameCount % 5 === 0 && diplomaPhase >= 1) {
+        spawnParticles(Math.random() * 800, -10, ['#ffd700', '#ff4040', '#4040ff', '#40ff40'][Math.floor(Math.random() * 4)], 3);
+    }
+
+    // Stars
+    for (let i = 0; i < 40; i++) {
+        const sx = (i * 21 + frameCount * 0.8) % 800;
+        const sy = (i * 17 + frameCount * 0.3) % 600;
+        const bright = Math.sin(frameCount * 0.08 + i) * 0.5 + 0.5;
+        ctx.fillStyle = `rgba(255, 215, 0, ${bright * 0.7})`;
+        ctx.fillRect(sx, sy, 3, 3);
+    }
+
+    ctx.textAlign = 'center';
+
+    if (diplomaPhase === 0) {
+        // Luther presenting
+        ctx.fillStyle = PAL.gold;
+        ctx.font = '16px "Press Start 2P"';
+        const alpha = Math.min(1, diplomaTimer / 40);
+        ctx.fillStyle = `rgba(255, 215, 0, ${alpha})`;
+        ctx.fillText('Martin Luther says:', 400, 200);
+        ctx.fillStyle = `rgba(224, 224, 240, ${alpha})`;
+        ctx.font = '11px "Press Start 2P"';
+        ctx.fillText('"Young Scholar, you have proven yourself worthy!"', 400, 250);
+        ctx.fillText('"I present to you this diploma..."', 400, 280);
+    }
+
+    if (diplomaPhase >= 1) {
+        // Diploma parchment
+        const unrollProgress = Math.min(1, (diplomaTimer - 60) / 60);
+        const diplomaH = 360 * unrollProgress;
+        const diplomaW = 520;
+        const dx = 400 - diplomaW / 2;
+        const dy = 100;
+
+        // Parchment shadow
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+        ctx.fillRect(dx + 6, dy + 6, diplomaW, diplomaH);
+
+        // Parchment body
+        const parchGrad = ctx.createLinearGradient(dx, dy, dx + diplomaW, dy + diplomaH);
+        parchGrad.addColorStop(0, '#f5e6c8');
+        parchGrad.addColorStop(0.5, '#faf0dc');
+        parchGrad.addColorStop(1, '#f0dbb8');
+        ctx.fillStyle = parchGrad;
+        ctx.fillRect(dx, dy, diplomaW, diplomaH);
+
+        // Parchment border
+        ctx.strokeStyle = '#8B6914';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(dx, dy, diplomaW, diplomaH);
+
+        // Inner border
+        ctx.strokeStyle = '#c8a050';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(dx + 10, dy + 10, diplomaW - 20, diplomaH - 20);
+
+        // Corner decorations
+        if (diplomaH > 100) {
+            const corners = [[dx + 15, dy + 15], [dx + diplomaW - 25, dy + 15], [dx + 15, dy + diplomaH - 25], [dx + diplomaW - 25, dy + diplomaH - 25]];
+            corners.forEach(([cx, cy]) => {
+                if (cy < dy + diplomaH - 10) {
+                    ctx.fillStyle = PAL.gold;
+                    ctx.fillRect(cx, cy, 10, 10);
+                    ctx.fillStyle = '#b8960a';
+                    ctx.fillRect(cx + 2, cy + 2, 6, 6);
+                }
+            });
+        }
+
+        // Top scroll roll
+        ctx.fillStyle = '#d4b68a';
+        ctx.fillRect(dx - 10, dy - 8, diplomaW + 20, 16);
+        ctx.fillStyle = '#c4a67a';
+        ctx.fillRect(dx - 10, dy - 4, diplomaW + 20, 8);
+
+        // Bottom scroll roll
+        if (unrollProgress >= 1) {
+            ctx.fillStyle = '#d4b68a';
+            ctx.fillRect(dx - 10, dy + diplomaH - 8, diplomaW + 20, 16);
+            ctx.fillStyle = '#c4a67a';
+            ctx.fillRect(dx - 10, dy + diplomaH - 4, diplomaW + 20, 8);
+        }
+    }
+
+    if (diplomaPhase >= 2) {
+        const textAlpha = Math.min(1, (diplomaTimer - 120) / 60);
+        const dx = 400;
+        const dy = 100;
+
+        ctx.globalAlpha = textAlpha;
+
+        // Ethiopian cross at top
+        ctx.fillStyle = PAL.gold;
+        ctx.fillRect(dx - 3, dy + 25, 6, 30);
+        ctx.fillRect(dx - 12, dy + 35, 24, 6);
+
+        // Diploma text
+        ctx.fillStyle = '#2a1a0a';
+        ctx.font = '14px "Press Start 2P"';
+        ctx.fillText('CERTIFICATE OF', dx, dy + 80);
+        ctx.fillText('KNOWLEDGE', dx, dy + 105);
+
+        ctx.fillStyle = '#4a3020';
+        ctx.font = '9px "Press Start 2P"';
+        ctx.fillText('This diploma is presented to', dx, dy + 140);
+
+        ctx.fillStyle = '#8b0000';
+        ctx.font = '16px "Press Start 2P"';
+        ctx.fillText('THE YOUNG SCHOLAR', dx, dy + 170);
+
+        ctx.fillStyle = '#4a3020';
+        ctx.font = '8px "Press Start 2P"';
+        ctx.fillText('For successfully completing the quest to', dx, dy + 200);
+        ctx.fillText('deliver the Sacred Scroll from Ethiopia', dx, dy + 218);
+        ctx.fillText('to Wittenberg and demonstrating mastery of', dx, dy + 236);
+
+        ctx.fillStyle = '#2a1a0a';
+        ctx.font = '10px "Press Start 2P"';
+        ctx.fillText('Ethiopian Christianity &', dx, dy + 264);
+        ctx.fillText('the Protestant Reformation', dx, dy + 284);
+
+        ctx.fillStyle = '#4a3020';
+        ctx.font = '8px "Press Start 2P"';
+        ctx.fillText(`Score: ${playerData.correctAnswers}/${playerData.questionsAnswered} correct`, dx, dy + 310);
+
+        // Luther's signature
+        ctx.fillStyle = '#1a0a0a';
+        ctx.font = '10px "Press Start 2P"';
+        ctx.fillText('— Martin Luther', dx + 80, dy + 340);
+        ctx.font = '7px "Press Start 2P"';
+        ctx.fillText('Wittenberg, 1534', dx + 80, dy + 355);
+
+        // Seal
+        ctx.fillStyle = '#8b0000';
+        ctx.beginPath();
+        ctx.arc(dx - 100, dy + 340, 20, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#a01010';
+        ctx.beginPath();
+        ctx.arc(dx - 100, dy + 340, 15, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = PAL.gold;
+        ctx.font = '7px "Press Start 2P"';
+        ctx.fillText('SEAL', dx - 100, dy + 343);
+
+        ctx.globalAlpha = 1;
+    }
+
+    if (diplomaPhase >= 3) {
+        // Congratulations message below diploma
+        ctx.fillStyle = PAL.gold;
+        ctx.font = '12px "Press Start 2P"';
+        const congBob = Math.sin(frameCount * 0.05) * 3;
+        ctx.fillText('QUEST COMPLETE!', 400, 490 + congBob);
+
+        ctx.fillStyle = '#a0a0d0';
+        ctx.font = '8px "Press Start 2P"';
+        ctx.fillText('Ethiopian Christianity was the forerunner', 400, 520);
+        ctx.fillText('of the European Reformation.', 400, 536);
+
+        if (Math.floor(frameCount / 25) % 2 === 0) {
+            ctx.fillStyle = '#8080b0';
+            ctx.font = '8px "Press Start 2P"';
+            ctx.fillText('Press SPACE to return to the world', 400, 575);
+        }
+
+        if (keyJustPressed(' ') || keyJustPressed('Enter')) {
+            battleState = null;
+            gameState = 'overworld';
+            playerData.hp = playerData.maxHp;
+        }
+    }
+
+    ctx.textAlign = 'left';
+    drawParticles();
+}
+
+function checkLevelUp() {
+    const xpNeeded = playerData.level * 50;
+    while (playerData.xp >= xpNeeded) {
+        playerData.xp -= xpNeeded;
+        playerData.level++;
+        playerData.maxHp += 10;
+        playerData.hp = playerData.maxHp;
+        playerData.wisdom += 5;
+        spawnParticles(400, 300, PAL.gold, 30);
+    }
+}
+
+// ── Map Transitions ──
+function startMapTransition(targetMap, tx, ty) {
+    gameState = 'mapTransition';
+    mapTransitionAlpha = 0;
+    mapTransitionDir = 1;
+    mapTransitionTarget = { map: targetMap, x: tx, y: ty };
+}
+
+function updateMapTransition() {
+    mapTransitionAlpha += mapTransitionDir * 0.04;
+    if (mapTransitionAlpha >= 1 && mapTransitionDir === 1) {
+        playerData.currentMap = mapTransitionTarget.map;
+        playerData.x = mapTransitionTarget.x;
+        playerData.y = mapTransitionTarget.y;
+        playerData.targetX = playerData.x;
+        playerData.targetY = playerData.y;
+        mapTransitionDir = -1;
+    }
+    if (mapTransitionAlpha <= 0 && mapTransitionDir === -1) {
+        mapTransitionAlpha = 0;
+        gameState = 'overworld';
+    }
+}
+
+function drawMapTransition() {
+    drawOverworld();
+    ctx.fillStyle = `rgba(0, 0, 0, ${mapTransitionAlpha})`;
+    ctx.fillRect(0, 0, 800, 600);
+
+    if (mapTransitionAlpha > 0.5 && mapTransitionTarget) {
+        ctx.fillStyle = `rgba(255, 215, 0, ${(mapTransitionAlpha - 0.5) * 2})`;
+        ctx.font = '14px "Press Start 2P"';
+        ctx.textAlign = 'center';
+        ctx.fillText(maps[mapTransitionTarget.map].name, 400, 290);
+
+        // Flavor text for each area
+        ctx.fillStyle = `rgba(160, 160, 200, ${(mapTransitionAlpha - 0.5) * 2})`;
+        ctx.font = '9px "Press Start 2P"';
+        const flavors = {
+            aksum: 'The ancient heart of Ethiopian Christianity...',
+            lalibela: 'Where churches are carved from living rock...',
+            wittenberg: 'Where a monk dared to challenge the world...'
+        };
+        ctx.fillText(flavors[mapTransitionTarget.map] || '', 400, 320);
+        ctx.textAlign = 'left';
+    }
+}
+
+// ── Main Game Loop ──
+function update() {
+    frameCount++;
+    updateParticles();
+
+    switch (gameState) {
+        case 'title': updateTitle(); break;
+        case 'prologue': updatePrologue(); break;
+        case 'overworld': updateOverworld(); break;
+        case 'npcWalking': updateNpcWalk(); break;
+        case 'dialogue': updateDialogue(); break;
+        case 'battleIntro':
+        case 'battle': updateBattle(); break;
+        case 'victory': break;
+        case 'diploma': updateDiploma(); break;
+        case 'mapTransition': updateMapTransition(); break;
+    }
+}
+
+function draw() {
+    ctx.clearRect(0, 0, 800, 600);
+
+    switch (gameState) {
+        case 'title': drawTitle(); break;
+        case 'prologue': drawPrologue(); break;
+        case 'overworld': drawOverworld(); break;
+        case 'npcWalking': drawOverworld(); break;
+        case 'dialogue':
+            drawOverworld();
+            drawDialogue();
+            break;
+        case 'battleIntro':
+        case 'battle': drawBattle(); break;
+        case 'victory': drawVictory(); break;
+        case 'diploma': drawDiploma(); break;
+        case 'mapTransition': drawMapTransition(); break;
+    }
+}
+
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
