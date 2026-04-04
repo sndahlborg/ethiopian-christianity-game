@@ -2230,27 +2230,46 @@ function drawBattle() {
     if (battleState.phase === 'question' || battleState.phase === 'answered') {
         const q = battleState.questions[battleState.currentQuestion];
 
+        // Pre-calculate layout to determine total height needed
+        ctx.font = '8px "Press Start 2P"';
+        const answerBoxes = [];
+        for (let i = 0; i < 4; i++) {
+            const answerText = `${['A', 'B', 'C', 'D'][i]}. ${q.options[i]}`;
+            ctx.font = '8px "Press Start 2P"';
+            const needsWrap = ctx.measureText(answerText).width > 320;
+            answerBoxes.push({ text: answerText, needsWrap });
+        }
+        const row0Needs2 = answerBoxes[0].needsWrap || answerBoxes[2].needsWrap;
+        const row0H = row0Needs2 ? 38 : 26;
+        const row1Needs2 = answerBoxes[1].needsWrap || answerBoxes[3].needsWrap;
+        const row1H = row1Needs2 ? 38 : 26;
+
+        ctx.font = '10px "Press Start 2P"';
+        const qLines = getWrappedLineCount(q.q, 720, '10px "Press Start 2P"');
+        const totalAnswerH = row0H + 6 + row1H;
+        const totalContentH = qLines * 18 + 10 + totalAnswerH + 30;
+        const boxY = 600 - totalContentH;
+        const boxH = totalContentH;
+
         ctx.fillStyle = 'rgba(20, 15, 40, 0.95)';
-        ctx.fillRect(20, 420, 760, 175);
+        ctx.fillRect(20, boxY, 760, boxH);
         ctx.strokeStyle = PAL.textBorder;
         ctx.lineWidth = 2;
-        ctx.strokeRect(20, 420, 760, 175);
+        ctx.strokeRect(20, boxY, 760, boxH);
 
         ctx.fillStyle = '#e0e0ff';
         ctx.font = '10px "Press Start 2P"';
-        // Measure how many lines the question wraps to
-        const qLines = getWrappedLineCount(q.q, 720, '10px "Press Start 2P"');
-        const qStartY = 444;
+        const qStartY = boxY + 24;
         wrapText(q.q, 40, qStartY, 720, 18);
 
-        // Push answers down if question takes multiple lines
         const answerBaseY = qStartY + qLines * 18 + 10;
 
         for (let i = 0; i < 4; i++) {
             const col = i < 2 ? 0 : 1;
             const row = i % 2;
             const ax = 40 + col * 370;
-            const ay = answerBaseY + row * 35;
+            const ay = answerBaseY + (row === 0 ? 0 : row0H + 6);
+            const bH = row === 0 ? row0H : row1H;
 
             let bgColor = 'rgba(40, 30, 70, 0.8)';
             let textColor = '#c0c0e0';
@@ -2269,29 +2288,42 @@ function drawBattle() {
             }
 
             ctx.fillStyle = bgColor;
-            ctx.fillRect(ax - 5, ay - 14, 350, 28);
+            ctx.fillRect(ax - 5, ay - 12, 350, bH);
 
             if (i === battleState.selectedAnswer && battleState.phase === 'question') {
                 ctx.strokeStyle = PAL.gold;
-                ctx.strokeRect(ax - 5, ay - 14, 350, 28);
+                ctx.strokeRect(ax - 5, ay - 12, 350, bH);
             }
 
             ctx.fillStyle = textColor;
-            const answerText = `${['A', 'B', 'C', 'D'][i]}. ${q.options[i]}`;
-            // Shrink font if text is too wide for the answer box
-            let answerFont = '9px "Press Start 2P"';
-            ctx.font = answerFont;
-            if (ctx.measureText(answerText).width > 340) {
-                answerFont = '7px "Press Start 2P"';
-                ctx.font = answerFont;
+            ctx.font = '8px "Press Start 2P"';
+            const answerText = answerBoxes[i].text;
+            if (answerBoxes[i].needsWrap) {
+                const words = answerText.split(' ');
+                let line1 = '';
+                let line2 = '';
+                let onLine2 = false;
+                for (const word of words) {
+                    const test = line1 + (line1 ? ' ' : '') + word;
+                    ctx.font = '8px "Press Start 2P"';
+                    if (!onLine2 && ctx.measureText(test).width <= 320) {
+                        line1 = test;
+                    } else {
+                        onLine2 = true;
+                        line2 += (line2 ? ' ' : '') + word;
+                    }
+                }
+                ctx.fillText(line1, ax + 5, ay + 4, 338);
+                if (line2) ctx.fillText(line2, ax + 5, ay + 18, 338);
+            } else {
+                ctx.fillText(answerText, ax + 5, ay + (bH > 26 ? 8 : 4), 338);
             }
-            ctx.fillText(answerText, ax + 5, ay + 2);
         }
 
         ctx.fillStyle = '#606090';
         ctx.font = '8px "Press Start 2P"';
         ctx.textAlign = 'right';
-        ctx.fillText(`Q${battleState.currentQuestion + 1}/${battleState.questions.length}`, 770, 436);
+        ctx.fillText(`Q${battleState.currentQuestion + 1}/${battleState.questions.length}`, 770, boxY + 16);
         ctx.textAlign = 'left';
     }
 
@@ -2484,10 +2516,10 @@ function drawDiploma() {
     if (diplomaPhase >= 1) {
         // Diploma parchment
         const unrollProgress = Math.min(1, (diplomaTimer - 60) / 60);
-        const diplomaH = 360 * unrollProgress;
+        const diplomaH = 420 * unrollProgress;
         const diplomaW = 520;
         const dx = 400 - diplomaW / 2;
-        const dy = 100;
+        const dy = 60;
 
         // Parchment shadow
         ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
@@ -2542,7 +2574,7 @@ function drawDiploma() {
     if (diplomaPhase >= 2) {
         const textAlpha = Math.min(1, (diplomaTimer - 120) / 60);
         const dx = 400;
-        const dy = 100;
+        const dy = 60;
 
         ctx.globalAlpha = textAlpha;
 
@@ -2580,8 +2612,8 @@ function drawDiploma() {
         const pct = playerData.questionsAnswered > 0 ? Math.round(playerData.correctAnswers / playerData.questionsAnswered * 100) : 0;
         ctx.fillStyle = '#4a3020';
         ctx.font = '8px "Press Start 2P"';
-        ctx.fillText(`Score: ${playerData.correctAnswers}/${playerData.questionsAnswered} (${pct}%)`, dx, dy + 306);
-        ctx.fillText(`Level: ${playerData.level}   XP: ${playerData.xp + playerData.level * 50}`, dx, dy + 322);
+        ctx.fillText(`Score: ${playerData.correctAnswers}/${playerData.questionsAnswered} (${pct}%)`, dx, dy + 310);
+        ctx.fillText(`Level: ${playerData.level}   XP: ${playerData.xp + playerData.level * 50}`, dx, dy + 328);
 
         // Grade
         let grade = 'F';
@@ -2591,28 +2623,38 @@ function drawDiploma() {
         else if (pct >= 70) grade = 'C';
         else if (pct >= 60) grade = 'D';
         ctx.fillStyle = pct >= 90 ? '#2a6a2a' : pct >= 70 ? '#4a3020' : '#8b0000';
-        ctx.font = '12px "Press Start 2P"';
-        ctx.fillText(`Grade: ${grade}`, dx, dy + 344);
+        ctx.font = '14px "Press Start 2P"';
+        ctx.fillText(`Grade: ${grade}`, dx, dy + 355);
 
-        // Luther's signature
-        ctx.fillStyle = '#1a0a0a';
-        ctx.font = '10px "Press Start 2P"';
-        ctx.fillText(' Martin Luther', dx + 60, dy + 340);
-        ctx.font = '7px "Press Start 2P"';
-        ctx.fillText('Wittenberg, 1534', dx + 60, dy + 355);
+        // Divider line
+        ctx.strokeStyle = '#c8a050';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(dx - 230, dy + 370);
+        ctx.lineTo(dx + 230, dy + 370);
+        ctx.stroke();
 
-        // Seal
+        // Seal (bottom left)
         ctx.fillStyle = '#8b0000';
         ctx.beginPath();
-        ctx.arc(dx - 100, dy + 340, 20, 0, Math.PI * 2);
+        ctx.arc(dx - 140, dy + 395, 20, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = '#a01010';
         ctx.beginPath();
-        ctx.arc(dx - 100, dy + 340, 15, 0, Math.PI * 2);
+        ctx.arc(dx - 140, dy + 395, 15, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = PAL.gold;
         ctx.font = '7px "Press Start 2P"';
-        ctx.fillText('SEAL', dx - 100, dy + 343);
+        ctx.fillText('SEAL', dx - 140, dy + 398);
+
+        // Luther's signature (bottom right)
+        ctx.fillStyle = '#1a0a0a';
+        ctx.font = '10px "Press Start 2P"';
+        ctx.textAlign = 'right';
+        ctx.fillText('Martin Luther', dx + 200, dy + 390);
+        ctx.font = '7px "Press Start 2P"';
+        ctx.fillText('Wittenberg, 1534', dx + 200, dy + 405);
+        ctx.textAlign = 'left';
 
         ctx.globalAlpha = 1;
     }
@@ -2622,12 +2664,12 @@ function drawDiploma() {
         ctx.fillStyle = PAL.gold;
         ctx.font = '12px "Press Start 2P"';
         const congBob = Math.sin(frameCount * 0.05) * 3;
-        ctx.fillText('QUEST COMPLETE!', 400, 490 + congBob);
+        ctx.fillText('QUEST COMPLETE!', 400, 510 + congBob);
 
         ctx.fillStyle = '#a0a0d0';
         ctx.font = '8px "Press Start 2P"';
-        ctx.fillText('Ethiopian Christianity was the forerunner', 400, 520);
-        ctx.fillText('of the European Reformation.', 400, 536);
+        ctx.fillText('Ethiopian Christianity was the forerunner', 400, 538);
+        ctx.fillText('of the European Reformation.', 400, 554);
 
         if (Math.floor(frameCount / 25) % 2 === 0) {
             ctx.fillStyle = '#8080b0';
