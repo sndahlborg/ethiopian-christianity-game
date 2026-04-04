@@ -92,6 +92,7 @@
                 cursor: pointer;
                 user-select: none;
                 -webkit-user-select: none;
+                -webkit-tap-highlight-color: transparent;
                 touch-action: none;
                 transition: background 0.07s;
             }
@@ -125,6 +126,7 @@
                 cursor: pointer;
                 user-select: none;
                 -webkit-user-select: none;
+                -webkit-tap-highlight-color: transparent;
                 touch-action: none;
                 display: flex;
                 align-items: center;
@@ -201,9 +203,15 @@
             Object.entries(BTN_MAP).forEach(([id, key]) => {
                 const el = document.getElementById(id);
                 if (!el) return;
-                el.addEventListener('touchstart',  e => { e.preventDefault(); press(key);   el.classList.add('pressed');    }, { passive: false });
-                el.addEventListener('touchend',    e => { e.preventDefault(); release(key); el.classList.remove('pressed'); }, { passive: false });
-                el.addEventListener('touchcancel', () => {                    release(key); el.classList.remove('pressed'); });
+                el.addEventListener('pointerdown', e => {
+                    e.preventDefault();
+                    el.setPointerCapture(e.pointerId);
+                    press(key);
+                    el.classList.add('pressed');
+                }, { passive: false });
+                el.addEventListener('pointerup',     e => { e.preventDefault(); release(key); el.classList.remove('pressed'); }, { passive: false });
+                el.addEventListener('pointercancel', e => {                     release(key); el.classList.remove('pressed'); });
+                el.addEventListener('pointerleave',  e => {                     release(key); el.classList.remove('pressed'); });
             });
 
             // Block default touch gestures (scroll, zoom) on the canvas itself
