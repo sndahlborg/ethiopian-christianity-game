@@ -1383,7 +1383,14 @@ function isSolid(mapKey, x, y) {
     const tile = map.tiles[y][x];
     if ([2, 3, 4, 5, 7, 11, 13, 14].includes(tile)) return true;
     for (const npc of map.npcs) {
-        if (npc.x === x && npc.y === y) return true;
+        if (npc.x === x && npc.y === y) {
+            // Defeated spirits are passable
+            if (npc.isSpirit) {
+                const quizKey = mapKey === 'aksum' ? 'quiz1' : mapKey === 'lalibela' ? 'quiz2' : 'quiz3';
+                if (playerData.defeatedBosses.includes(quizKey)) continue;
+            }
+            return true;
+        }
     }
     // Artifacts are solid objects
     const regionArtifacts = artifacts[mapKey] || [];
