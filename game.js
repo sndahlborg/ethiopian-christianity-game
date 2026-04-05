@@ -852,7 +852,7 @@ const maps = {
             },
             {
                 id: 'spirit_lalibela',
-                x: 23, y: 9,
+                x: 23, y: 8,
                 dir: 'down',
                 isSpirit: true,
                 colors: { body: 'rgba(90,60,20,0.7)', skin: 'rgba(180,160,220,0.8)', hair: '#604010', legs: 'rgba(90,60,30,0.7)', shoes: 'rgba(60,40,10,0.7)' },
@@ -1383,14 +1383,7 @@ function isSolid(mapKey, x, y) {
     const tile = map.tiles[y][x];
     if ([2, 3, 4, 5, 7, 11, 13, 14].includes(tile)) return true;
     for (const npc of map.npcs) {
-        if (npc.x === x && npc.y === y) {
-            // Defeated spirits are passable
-            if (npc.isSpirit) {
-                const quizKey = mapKey === 'aksum' ? 'quiz1' : mapKey === 'lalibela' ? 'quiz2' : 'quiz3';
-                if (playerData.defeatedBosses.includes(quizKey)) continue;
-            }
-            return true;
-        }
+        if (npc.x === x && npc.y === y) return true;
     }
     // Artifacts are solid objects
     const regionArtifacts = artifacts[mapKey] || [];
