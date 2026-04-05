@@ -731,7 +731,7 @@ const maps = {
                     'Come --follow me to the scriptorium! I want to show you something.'
                 ],
                 walkAfterDialogue: {
-                    steps: [{ x: 6, y: 7 }, { x: 8, y: 7 }, { x: 8, y: 9 }],
+                    steps: [{ x: 6, y: 7 }, { x: 8, y: 7 }, { x: 8, y: 8 }],
                     dialogue: [
                         { name: 'Brother Ezra', text: 'Here --look at these sacred texts. We read Scripture in Ge\'ez, our own language.' },
                         { name: 'Brother Ezra', text: 'Every believer can hear God\'s word in a tongue they understand!' },
@@ -774,7 +774,7 @@ const maps = {
             },
             {
                 id: 'spirit_aksum',
-                x: 22, y: 9,
+                x: 22, y: 8,
                 dir: 'down',
                 isSpirit: true,
                 colors: { body: 'rgba(106,42,170,0.7)', skin: 'rgba(180,160,220,0.8)', hair: '#4a1070', legs: 'rgba(80,30,140,0.7)', shoes: 'rgba(60,20,100,0.7)' },
@@ -803,7 +803,7 @@ const maps = {
                     'Walk with me --let me show you the church where I received my calling.'
                 ],
                 walkAfterDialogue: {
-                    steps: [{ x: 12, y: 8 }, { x: 14, y: 8 }, { x: 14, y: 9 }],
+                    steps: [{ x: 12, y: 8 }, { x: 14, y: 8 }, { x: 14, y: 7 }],
                     dialogue: [
                         { name: 'Michael the Deacon', text: 'The church elders have asked me to travel to Europe --to Wittenberg, Germany.' },
                         { name: 'Michael the Deacon', text: 'There is a monk there named Martin Luther who is shaking the foundations of the Catholic Church!' },
