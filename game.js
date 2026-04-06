@@ -72,6 +72,15 @@ let doorOpenPhase = 0; // 0=luther speaks, 1=doors opening, 2=walk through
 // Artifact popup state
 let activeArtifact = null;
 
+// Ethiopia Map state
+let ethioMapPrevState = null;
+let ethioMapSelected = 0;
+
+// Slideshow state
+let slideshowIndex = 0;
+let slideshowTimer = 0;
+let slideshowAlpha = 0;
+
 // Codex/Index state
 let codexOpen = false;
 let codexScroll = 0;
@@ -1836,6 +1845,13 @@ function drawPrologueScene(bg, step) {
 
 //  Overworld 
 function updateOverworld() {
+    // Open Ethiopia map with 'm' key
+    if (keyJustPressed('m') || keyJustPressed('M')) {
+        ethioMapPrevState = 'overworld';
+        ethioMapSelected = 0;
+        gameState = 'ethioMap';
+        return;
+    }
     // Toggle codex with 'c' or 'i' key
     if (keyJustPressed('c') || keyJustPressed('i')) {
         codexOpen = !codexOpen;
@@ -2334,7 +2350,7 @@ function drawHUD(mapName) {
     ctx.fillStyle = bosses.includes('quiz3') ? '#70d070' : '#606080';
     ctx.fillText(bosses.includes('quiz3') ? ' Luther' : ' Luther', 590, questY + 52);
 
-    // Codex button hint
+    // Codex + Map button hints
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.fillRect(10, 46, 120, 20);
     ctx.strokeStyle = PAL.textBorder;
@@ -2342,6 +2358,14 @@ function drawHUD(mapName) {
     ctx.fillStyle = '#8888bb';
     ctx.font = '7px "Press Start 2P"';
     ctx.fillText('[C] CODEX', 20, 60);
+
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(10, 70, 120, 20);
+    ctx.strokeStyle = PAL.textBorder;
+    ctx.strokeRect(10, 70, 120, 20);
+    ctx.fillStyle = '#8888bb';
+    ctx.font = '7px "Press Start 2P"';
+    ctx.fillText('[M] MAP', 20, 84);
 }
 
 // -- Codex / Index Overlay --
@@ -3354,8 +3378,10 @@ function drawDiploma() {
         }
 
         if (keyJustPressed(' ') || keyJustPressed('Enter')) {
-            resetGame();
-            gameState = 'title';
+            gameState = 'slideshow';
+            slideshowIndex = 0;
+            slideshowTimer = 0;
+            slideshowAlpha = 0;
         }
     }
 
@@ -3363,7 +3389,482 @@ function drawDiploma() {
     drawParticles();
 }
 
-//  Door Opening Sequence (after beating Luther) 
+// ─── Interactive Ethiopia Map ──────────────────────────────────────────────
+
+function updateEthioMap() {
+    if (keyJustPressed(' ') || keyJustPressed('Escape') || keyJustPressed('m') || keyJustPressed('M') || keyJustPressed('Enter')) {
+        gameState = ethioMapPrevState || 'overworld';
+        ethioMapPrevState = null;
+        return;
+    }
+    if (keyJustPressed('ArrowRight') || keyJustPressed('ArrowDown')) {
+        ethioMapSelected = (ethioMapSelected + 1) % ethioLocations.length;
+    }
+    if (keyJustPressed('ArrowLeft') || keyJustPressed('ArrowUp')) {
+        ethioMapSelected = (ethioMapSelected - 1 + ethioLocations.length) % ethioLocations.length;
+    }
+}
+
+function drawEthioMap() {
+    // ── Layout: LEFT 460px = map, RIGHT 340px = info panel ───────────────────
+    // Map region: lon 28-52°E → 460px, lat 2-20°N → 540px (top margin 30px)
+    // x=(lon-28)*19.17  y=570-(lat-2)*30
+
+    // Ocean background (map column only)
+    ctx.fillStyle = '#0d2a40';
+    ctx.fillRect(0, 0, 460, 600);
+
+    // ── Land masses (drawn before Ethiopia so Ethiopia sits on top) ───────────
+
+    // Sudan / South Sudan (western strip)
+    ctx.fillStyle = '#1c2a14';
+    ctx.beginPath();
+    ctx.moveTo(0, 0); ctx.lineTo(108, 0); ctx.lineTo(106, 90);
+    ctx.lineTo(96, 270); ctx.lineTo(96, 450); ctx.lineTo(60, 600);
+    ctx.lineTo(0, 600); ctx.closePath();
+    ctx.fill();
+
+    // Eritrea (thin strip above Ethiopia's north border)
+    ctx.fillStyle = '#20281a';
+    ctx.beginPath();
+    ctx.moveTo(106, 90); ctx.lineTo(106, 0); ctx.lineTo(245, 0);
+    ctx.lineTo(269, 90); ctx.closePath();
+    ctx.fill();
+
+    // Red Sea + Gulf of Aden — drawn BEFORE Somalia so Somalia land sits on top
+    // Blue water wedge in the upper-right of the map column
+    ctx.fillStyle = '#0e3a5c';
+    ctx.beginPath();
+    ctx.moveTo(245, 0); ctx.lineTo(460, 0); ctx.lineTo(460, 310);
+    ctx.lineTo(410, 265); ctx.lineTo(340, 250); ctx.lineTo(289, 268);
+    ctx.lineTo(269, 90); ctx.lineTo(245, 0); ctx.closePath();
+    ctx.fill();
+
+    // Somalia (right side of map, below Red Sea line)
+    ctx.fillStyle = '#1e2a18';
+    ctx.beginPath();
+    ctx.moveTo(289, 268); ctx.lineTo(340, 250); ctx.lineTo(410, 265);
+    ctx.lineTo(450, 350); ctx.lineTo(440, 480); ctx.lineTo(380, 550);
+    ctx.lineTo(310, 555); ctx.lineTo(250, 510); ctx.lineTo(307, 480);
+    ctx.lineTo(289, 268); ctx.closePath();
+    ctx.fill();
+
+    // Kenya (southern strip)
+    ctx.fillStyle = '#1c2a14';
+    ctx.beginPath();
+    ctx.moveTo(60, 600); ctx.lineTo(96, 450); ctx.lineTo(135, 495);
+    ctx.lineTo(173, 510); ctx.lineTo(250, 510); ctx.lineTo(310, 555);
+    ctx.lineTo(300, 600); ctx.closePath();
+    ctx.fill();
+
+    // ── Ethiopia — bright center shape ────────────────────────────────────────
+    const ethPath = [
+        [106, 90], [173, 75], [220, 72], [269, 90],
+        [289, 268], [307, 480],
+        [250, 510], [173, 510],
+        [135, 495], [96, 450], [96, 270],
+    ];
+
+    // Drop shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ethPath.forEach(([x, y], i) => i === 0 ? ctx.moveTo(x+4, y+4) : ctx.lineTo(x+4, y+4));
+    ctx.closePath();
+    ctx.fill();
+
+    // Fill with gradient (lighter in highlands center)
+    const ethGrad = ctx.createLinearGradient(96, 72, 310, 510);
+    ethGrad.addColorStop(0,   '#326222');
+    ethGrad.addColorStop(0.4, '#4a8830');
+    ethGrad.addColorStop(1,   '#366025');
+    ctx.fillStyle = ethGrad;
+    ctx.beginPath();
+    ethPath.forEach(([x, y], i) => i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y));
+    ctx.closePath();
+    ctx.fill();
+
+    // Border
+    ctx.strokeStyle = '#80b848';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ethPath.forEach(([x, y], i) => i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y));
+    ctx.closePath();
+    ctx.stroke();
+
+    // ── Location markers ──────────────────────────────────────────────────────
+    // Label offsets per location to avoid overlap (Lake Tana close to Lalibela)
+    const labelOffsets = [
+        { dx: 0,   dy: -13, align: 'center' },  // Aksum — above
+        { dx: 16,  dy: 4,   align: 'left'   },  // Lalibela — right
+        { dx: 0,   dy: -13, align: 'center' },  // Addis Ababa — above
+        { dx: -10, dy: 4,   align: 'right'  },  // Lake Tana — left
+    ];
+
+    ethioLocations.forEach((loc, idx) => {
+        const isSelected = idx === ethioMapSelected;
+        const pulse = Math.sin(frameCount * 0.08 + idx * 1.5) * 0.3 + 0.7;
+
+        // Glow ring on selected
+        if (isSelected) {
+            ctx.fillStyle = `rgba(255,215,0,${pulse * 0.3})`;
+            ctx.beginPath();
+            ctx.arc(loc.x, loc.y, 16, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Dot
+        const r = isSelected ? 6 : 4;
+        ctx.fillStyle = isSelected ? loc.color : '#5a7848';
+        ctx.beginPath(); ctx.arc(loc.x, loc.y, r, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = isSelected ? '#fff' : '#3a5030';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(loc.x, loc.y, r, 0, Math.PI * 2); ctx.stroke();
+
+        // Label
+        const off = labelOffsets[idx];
+        ctx.fillStyle = isSelected ? loc.color : '#7a9862';
+        ctx.font = `${isSelected ? 8 : 7}px "Press Start 2P"`;
+        ctx.textAlign = off.align;
+        ctx.fillText(loc.name, loc.x + off.dx, loc.y + off.dy);
+    });
+
+    // ── Sea and country labels ────────────────────────────────────────────────
+    ctx.textAlign = 'center';
+
+    // Red Sea label (in the blue water area, upper right)
+    ctx.fillStyle = 'rgba(110, 190, 255, 0.9)';
+    ctx.font = '9px "Press Start 2P"';
+    ctx.fillText('RED SEA', 370, 60);
+
+    // Gulf of Aden (lower blue water, near Djibouti)
+    ctx.fillStyle = 'rgba(80, 160, 220, 0.65)';
+    ctx.font = '7px "Press Start 2P"';
+    ctx.fillText('GULF OF ADEN', 380, 215);
+
+    // Country labels (muted)
+    ctx.fillStyle = 'rgba(140, 180, 120, 0.4)';
+    ctx.font = '7px "Press Start 2P"';
+    ctx.fillText('SUDAN', 48, 320);
+    ctx.fillText('ERITREA', 174, 42);
+    ctx.fillText('SOMALIA', 390, 390);
+    ctx.fillText('KENYA', 178, 548);
+
+    // ── Ethiopia title badge (top-left of map) ────────────────────────────────
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(12, 12, 150, 26);
+    ctx.strokeStyle = '#80b848';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(12, 12, 150, 26);
+    ctx.fillStyle = '#a8e060';
+    ctx.font = '10px "Press Start 2P"';
+    ctx.textAlign = 'center';
+    ctx.fillText('ETHIOPIA', 87, 30);
+
+    // Thin divider between map and info panel
+    ctx.fillStyle = 'rgba(255,255,255,0.07)';
+    ctx.fillRect(462, 0, 2, 600);
+
+    // ── Info panel (right column: x=464 to x=800) ────────────────────────────
+    const sel = ethioLocations[ethioMapSelected];
+
+    ctx.fillStyle = '#080e06';
+    ctx.fillRect(464, 0, 336, 600);
+
+    // Accent bar at top (color-coded to selected location)
+    ctx.fillStyle = sel.color;
+    ctx.fillRect(464, 0, 336, 4);
+
+    // ── Compass rose (top of info panel) ─────────────────────────────────────
+    const crx = 620, cry = 52, crr = 20;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.beginPath(); ctx.arc(crx, cry, crr + 5, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#2a4028'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(crx, cry, crr + 5, 0, Math.PI * 2); ctx.stroke();
+    [['N',0,-crr],['S',0,crr],['E',crr,0],['W',-crr,0]].forEach(([l,dx,dy]) => {
+        ctx.fillStyle = l === 'N' ? '#d04040' : '#607858';
+        ctx.font = '7px "Press Start 2P"';
+        ctx.textAlign = 'center';
+        ctx.fillText(l, crx + dx * 0.78, cry + dy * 0.78 + 3);
+    });
+    // North needle
+    ctx.strokeStyle = '#d04040'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(crx, cry - crr * 0.6); ctx.lineTo(crx, cry); ctx.stroke();
+    // South needle
+    ctx.strokeStyle = '#405838'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(crx, cry); ctx.lineTo(crx, cry + crr * 0.6); ctx.stroke();
+
+    // ── Selected location name ────────────────────────────────────────────────
+    ctx.fillStyle = sel.color;
+    ctx.font = '11px "Press Start 2P"';
+    ctx.textAlign = 'left';
+    ctx.fillText(sel.name, 482, 118);
+
+    // Thin rule under name
+    ctx.strokeStyle = sel.color;
+    ctx.globalAlpha = 0.25;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(482, 126); ctx.lineTo(792, 126);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // ── Info lines ────────────────────────────────────────────────────────────
+    ctx.fillStyle = '#a0bc90';
+    ctx.font = '7px "Press Start 2P"';
+    sel.info.forEach((line, i) => {
+        ctx.fillText(line, 482, 152 + i * 22);
+    });
+
+    // ── Location navigation dots ──────────────────────────────────────────────
+    const dotBaseX = 504;
+    ethioLocations.forEach((_, i) => {
+        const isActive = i === ethioMapSelected;
+        ctx.fillStyle = isActive ? '#ffd700' : '#243020';
+        ctx.strokeStyle = isActive ? '#ffd700' : '#304028';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(dotBaseX + i * 22, 350, isActive ? 5 : 3, 0, Math.PI * 2);
+        ctx.fill();
+        if (!isActive) ctx.stroke();
+    });
+
+    // ── Navigate / close hints ────────────────────────────────────────────────
+    if (Math.floor(frameCount / 25) % 2 === 0) {
+        ctx.fillStyle = '#3a5030';
+        ctx.font = '7px "Press Start 2P"';
+        ctx.textAlign = 'center';
+        ctx.fillText('\u2190 \u2192 navigate', 630, 408);
+        ctx.fillText('SPACE to close', 630, 426);
+    }
+
+    // Era note at bottom of panel
+    ctx.fillStyle = '#304028';
+    ctx.font = '7px "Press Start 2P"';
+    ctx.textAlign = 'center';
+    ctx.fillText('HORN OF AFRICA', 630, 568);
+    ctx.fillText('c. 1st\u20137th Century', 630, 585);
+
+    ctx.textAlign = 'left';
+}
+
+// ─── End Slideshow ─────────────────────────────────────────────────────────
+
+function updateSlideshow() {
+    slideshowTimer++;
+    // Fade in
+    if (slideshowAlpha < 1) {
+        slideshowAlpha = Math.min(1, slideshowAlpha + 0.04);
+    }
+
+    if (slideshowAlpha >= 1 && (keyJustPressed(' ') || keyJustPressed('Enter') || keyJustPressed('ArrowRight'))) {
+        if (slideshowIndex < slideshowSlides.length - 1) {
+            slideshowIndex++;
+            slideshowAlpha = 0;
+            slideshowTimer = 0;
+        } else {
+            // Done — back to title
+            resetGame();
+            gameState = 'title';
+        }
+    }
+    if (keyJustPressed('ArrowLeft') && slideshowIndex > 0) {
+        slideshowIndex--;
+        slideshowAlpha = 0;
+        slideshowTimer = 0;
+    }
+}
+
+function _drawSlideshowIcon(icon, cx, cy) {
+    switch (icon) {
+        case 'star':
+            // 5-pointed star outline using pixel rects
+            for (let i = 0; i < 5; i++) {
+                const a = (i * 72 - 90) * Math.PI / 180;
+                ctx.fillStyle = '#ffd700';
+                ctx.fillRect(cx + Math.cos(a) * 28 - 3, cy + Math.sin(a) * 28 - 3, 6, 6);
+            }
+            ctx.fillStyle = '#ffd700';
+            ctx.fillRect(cx - 3, cy - 3, 6, 6);
+            break;
+        case 'church':
+            ctx.fillStyle = '#c8a050';
+            ctx.fillRect(cx - 18, cy - 10, 36, 28); // body
+            ctx.fillRect(cx - 22, cy - 18, 44, 10); // roof base
+            ctx.fillRect(cx - 5, cy - 40, 10, 24); // cross vertical
+            ctx.fillRect(cx - 10, cy - 32, 20, 8); // cross horizontal
+            break;
+        case 'coffee':
+            ctx.fillStyle = '#6a3010';
+            ctx.fillRect(cx - 14, cy - 8, 28, 20); // cup body
+            ctx.fillRect(cx - 18, cy - 12, 36, 6); // rim
+            ctx.fillStyle = '#c86420';
+            ctx.fillRect(cx - 10, cy - 6, 20, 4); // coffee surface
+            ctx.fillStyle = '#6a3010';
+            ctx.fillRect(cx + 14, cy - 4, 8, 12); // handle
+            ctx.fillRect(cx + 14, cy - 4, 4, 12);
+            // Steam
+            ctx.fillStyle = 'rgba(255,255,255,0.4)';
+            const sOff = Math.sin(frameCount * 0.05) * 3;
+            ctx.fillRect(cx - 6, cy - 20 + sOff, 4, 8);
+            ctx.fillRect(cx + 2, cy - 24 + sOff, 4, 8);
+            break;
+        case 'ship':
+            ctx.fillStyle = '#8060a0';
+            ctx.fillRect(cx - 24, cy, 48, 12); // hull
+            ctx.fillRect(cx - 28, cy + 8, 56, 6); // keel
+            ctx.fillStyle = '#d0c080';
+            ctx.fillRect(cx - 2, cy - 30, 4, 32); // mast
+            ctx.fillRect(cx - 2, cy - 30, 22, 4); // yard
+            ctx.fillStyle = 'rgba(240,240,200,0.8)';
+            ctx.fillRect(cx, cy - 26, 20, 22); // sail
+            break;
+        case 'water':
+            for (let row = 0; row < 3; row++) {
+                for (let col = 0; col < 3; col++) {
+                    const wx = cx - 24 + col * 20;
+                    const wy = cy - 16 + row * 14 + Math.sin(frameCount * 0.06 + col + row) * 3;
+                    ctx.fillStyle = row % 2 === 0 ? '#3080c0' : '#2060a0';
+                    ctx.fillRect(wx, wy, 16, 8);
+                }
+            }
+            break;
+        case 'shield':
+            ctx.fillStyle = '#8b0000';
+            ctx.fillRect(cx - 20, cy - 24, 40, 32);
+            ctx.fillRect(cx - 14, cy + 8, 28, 12);
+            ctx.fillRect(cx - 6, cy + 20, 12, 10);
+            ctx.fillStyle = PAL.gold;
+            ctx.fillRect(cx - 2, cy - 20, 4, 28); // cross vertical
+            ctx.fillRect(cx - 10, cy - 8, 20, 4); // cross horizontal
+            break;
+        case 'globe':
+        default:
+            // Simple globe
+            ctx.strokeStyle = '#50a0e0';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(cx, cy, 28, 0, Math.PI * 2);
+            ctx.stroke();
+            // Latitude lines
+            [-14, 0, 14].forEach(oy => {
+                const r = Math.sqrt(28 * 28 - oy * oy);
+                ctx.beginPath();
+                ctx.moveTo(cx - r, cy + oy);
+                ctx.lineTo(cx + r, cy + oy);
+                ctx.stroke();
+            });
+            // Longitude lines (simplified)
+            ctx.beginPath();
+            ctx.moveTo(cx, cy - 28); ctx.lineTo(cx, cy + 28);
+            ctx.stroke();
+            ctx.fillStyle = '#ffd700';
+            ctx.fillRect(cx - 5, cy - 5, 10, 10); // center dot
+            break;
+    }
+}
+
+function drawSlideshow() {
+    const slide = slideshowSlides[slideshowIndex];
+
+    // Background gradient
+    const bg = ctx.createLinearGradient(0, 0, 0, 600);
+    bg.addColorStop(0, slide.bg1);
+    bg.addColorStop(1, slide.bg2);
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, 800, 600);
+
+    // Subtle star field
+    for (let i = 0; i < 30; i++) {
+        const sx = (i * 37 + frameCount * 0.3) % 800;
+        const sy = (i * 53 + frameCount * 0.1) % 600;
+        const bright = (Math.sin(frameCount * 0.05 + i) * 0.3 + 0.4) * slideshowAlpha;
+        ctx.fillStyle = `rgba(255,255,255,${bright * 0.4})`;
+        ctx.fillRect(sx, sy, 2, 2);
+    }
+
+    ctx.globalAlpha = slideshowAlpha;
+
+    // Accent top bar
+    ctx.fillStyle = slide.accent;
+    ctx.fillRect(0, 0, 800, 5);
+    ctx.fillRect(0, 595, 800, 5);
+
+    // Icon area (left side)
+    ctx.save();
+    ctx.translate(160, 220);
+    _drawSlideshowIcon(slide.icon, 0, 0);
+    ctx.restore();
+
+    // Title
+    ctx.fillStyle = slide.accent;
+    ctx.font = '18px "Press Start 2P"';
+    ctx.textAlign = 'center';
+    ctx.fillText(slide.title, 490, 130);
+
+    // Subtitle
+    ctx.fillStyle = 'rgba(200,200,180,0.7)';
+    ctx.font = '8px "Press Start 2P"';
+    ctx.fillText(slide.sub, 490, 158);
+
+    // Divider
+    ctx.strokeStyle = slide.accent;
+    ctx.globalAlpha = slideshowAlpha * 0.4;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(320, 170); ctx.lineTo(680, 170);
+    ctx.stroke();
+    ctx.globalAlpha = slideshowAlpha;
+
+    // Body lines
+    ctx.fillStyle = '#d0d8c8';
+    ctx.font = '9px "Press Start 2P"';
+    ctx.textAlign = 'left';
+    let bodyY = 200;
+    slide.lines.forEach(line => {
+        if (line === '') { bodyY += 10; return; }
+        ctx.fillText(line, 320, bodyY);
+        bodyY += 22;
+    });
+
+    // visitethiopia.et on last slide (highlighted)
+    if (slideshowIndex === slideshowSlides.length - 1) {
+        ctx.fillStyle = slide.accent;
+        ctx.font = '10px "Press Start 2P"';
+        ctx.textAlign = 'center';
+        ctx.fillText('visitethiopia.et', 490, 440);
+        ctx.strokeStyle = slide.accent;
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = slideshowAlpha * 0.5;
+        ctx.beginPath();
+        ctx.moveTo(390, 446); ctx.lineTo(590, 446);
+        ctx.stroke();
+        ctx.globalAlpha = slideshowAlpha;
+    }
+
+    // Progress dots
+    const totalSlides = slideshowSlides.length;
+    const dotsX = 400 - (totalSlides * 18) / 2;
+    for (let i = 0; i < totalSlides; i++) {
+        ctx.fillStyle = i === slideshowIndex ? slide.accent : 'rgba(150,150,150,0.4)';
+        ctx.beginPath();
+        ctx.arc(dotsX + i * 18, 570, i === slideshowIndex ? 5 : 3, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Navigation hint
+    if (Math.floor(frameCount / 25) % 2 === 0 && slideshowAlpha >= 1) {
+        ctx.fillStyle = 'rgba(150,150,130,0.7)';
+        ctx.font = '7px "Press Start 2P"';
+        ctx.textAlign = 'center';
+        const isLast = slideshowIndex === slideshowSlides.length - 1;
+        ctx.fillText(isLast ? 'SPACE to play again' : 'SPACE for next', 490, 548);
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'left';
+}
+
+//  Door Opening Sequence (after beating Luther)
 function updateDoorOpening() {
     doorOpenTimer++;
 
@@ -3702,6 +4203,138 @@ const furtherReading = [
     'Martin Luther, "Table Talk" -- entries referencing Ethiopian Christianity (1534)'
 ];
 
+// Interactive Ethiopia map locations
+// x,y = marker position in the LEFT 460px map column
+// Map region: lon 28-52°E (24°) → 460px wide; lat 2-20°N (18°) → 540px tall, offset 30px top
+// x = (lon-28)*19.17   y = 570-(lat-2)*30
+const ethioLocations = [
+    {
+        name: 'AKSUM',
+        x: 205, y: 207,   // 38.7°E, 14.1°N
+        color: PAL.gold,
+        info: ['Capital of the Aksumite Kingdom (1st-7th c.)',
+               'One of Africa\'s first Christian nations.',
+               'Legendary home of the Ark of the Covenant.',
+               'A key stop on YOUR quest in this game.']
+    },
+    {
+        name: 'LALIBELA',
+        x: 211, y: 270,   // 39°E, 12°N
+        color: '#c8a050',
+        info: ['11 churches carved from solid rock (12th c.).',
+               'Called "the New Jerusalem" of Africa.',
+               'UNESCO World Heritage Site.',
+               'Another key stop on YOUR quest.']
+    },
+    {
+        name: 'ADDIS ABABA',
+        x: 205, y: 357,   // 38.7°E, 9.1°N
+        color: '#50d050',
+        info: ['Capital of modern Ethiopia.',
+               'Name means "New Flower" in Amharic.',
+               'Seat of the African Union since 1963.',
+               'One of Africa\'s highest capital cities.']
+    },
+    {
+        name: 'LAKE TANA',
+        x: 178, y: 258,   // 37.3°E, 12.5°N
+        color: '#50a0e0',
+        info: ['Source of the Blue Nile River.',
+               'The Blue Nile provides 85% of Nile water.',
+               'Ancient monasteries dot its sacred islands.',
+               'Manuscripts here date to the 10th century.']
+    },
+];
+
+// Slideshow slides shown after the diploma / further reading
+const slideshowSlides = [
+    {
+        bg1: '#0a1a0a', bg2: '#1a3a1a', accent: '#ffd700',
+        title: 'ANCIENT ETHIOPIA',
+        sub: '3,000+ years of unbroken civilization',
+        lines: ['One of the world\'s oldest nations,',
+                'Ethiopia has maintained a continuous',
+                'civilization for over three millennia.',
+                '',
+                'It was NEVER colonized by Europe --',
+                'a point of pride for all of Africa.'],
+        icon: 'star'
+    },
+    {
+        bg1: '#1a0a0a', bg2: '#2a1a0a', accent: '#c8a050',
+        title: 'LALIBELA\'S WONDER',
+        sub: '11 rock-hewn churches, 12th century',
+        lines: ['King Lalibela carved 11 churches',
+                'directly from solid rock, connected',
+                'by tunnels and ceremonial trenches.',
+                '',
+                'Pilgrims still worship here today,',
+                'unchanged after 900 years.'],
+        icon: 'church'
+    },
+    {
+        bg1: '#1a0a05', bg2: '#2a1505', accent: '#c86420',
+        title: 'BIRTHPLACE OF COFFEE',
+        sub: 'Kaffa region, southwestern Ethiopia',
+        lines: ['Coffee was first discovered in Ethiopia',
+                'over 1,000 years ago.',
+                '',
+                'The Ethiopian coffee ceremony --',
+                'roasting, grinding, and sharing --',
+                'is a sacred cultural tradition.'],
+        icon: 'coffee'
+    },
+    {
+        bg1: '#0a0a1a', bg2: '#0a1a2a', accent: '#50a0e0',
+        title: 'RED SEA EMPIRE',
+        sub: 'Aksumite trade routes, 1st-7th century',
+        lines: ['The Aksumite Kingdom was one of',
+                'the world\'s great trading empires.',
+                '',
+                'Red Sea ports connected Ethiopia',
+                'to Arabia, India, Egypt, and Rome.',
+                'Ivory, gold, and frankincense flowed.'],
+        icon: 'ship'
+    },
+    {
+        bg1: '#0a1a10', bg2: '#0a2a18', accent: '#50d0a0',
+        title: 'SOURCE OF THE NILE',
+        sub: 'Lake Tana, Ethiopian Highlands',
+        lines: ['Lake Tana in northwestern Ethiopia',
+                'is the source of the Blue Nile,',
+                'providing 85% of the Nile\'s water.',
+                '',
+                'Ancient island monasteries hold',
+                'manuscripts from the 10th century.'],
+        icon: 'water'
+    },
+    {
+        bg1: '#1a0505', bg2: '#2a0a0a', accent: '#ff6060',
+        title: 'BATTLE OF ADWA',
+        sub: 'March 1, 1896',
+        lines: ['Ethiopia crushed the Italian army',
+                'at the Battle of Adwa -- the first',
+                'African victory over a European',
+                'colonial power in modern history.',
+                '',
+                'A symbol of freedom across Africa.'],
+        icon: 'shield'
+    },
+    {
+        bg1: '#0a0a20', bg2: '#101030', accent: '#ffd700',
+        title: 'DISCOVER MORE',
+        sub: 'visitethiopia.et',
+        lines: ['From the Simien Mountains to the',
+                'Danakil Depression -- one of the',
+                'hottest places on Earth -- Ethiopia\'s',
+                'landscapes are extraordinary.',
+                '',
+                'Rich history. Incredible culture.',
+                'Your adventure awaits.'],
+        icon: 'globe'
+    },
+];
+
 // Region completion helper for spirit guide logic
 function getRegionCompletion(region) {
     const map = maps[region];
@@ -3885,6 +4518,8 @@ function update() {
         case 'diploma': updateDiploma(); break;
         case 'doorOpening': updateDoorOpening(); break;
         case 'mapTransition': updateMapTransition(); break;
+        case 'ethioMap': updateEthioMap(); break;
+        case 'slideshow': updateSlideshow(); break;
     }
 }
 
@@ -3910,6 +4545,8 @@ function draw() {
         case 'diploma': drawDiploma(); break;
         case 'doorOpening': drawDoorOpening(); break;
         case 'mapTransition': drawMapTransition(); break;
+        case 'ethioMap': drawEthioMap(); break;
+        case 'slideshow': drawSlideshow(); break;
     }
 }
 

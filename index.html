@@ -61,14 +61,14 @@
                 flex-shrink: 0;
             }
 
-            /* D-pad + action buttons row */
+            /* D-pad + action buttons + menu row */
             #mobile-controls {
                 display: flex;
+                flex-direction: column;
                 width: 100%;
                 max-width: 420px;
-                justify-content: space-between;
                 align-items: center;
-                padding: 4px 20px 20px;
+                gap: 0;
                 flex-shrink: 0;
             }
 
@@ -150,6 +150,41 @@
             .action-btn:active {
                 opacity: 0.55;
             }
+
+            /* Menu shortcut row (Codex + Map) */
+            #menu-btns {
+                display: flex;
+                width: 100%;
+                max-width: 420px;
+                gap: 12px;
+                padding: 0 20px 16px;
+            }
+
+            .menu-btn {
+                flex: 1;
+                height: 42px;
+                border-radius: 8px;
+                background: rgba(255, 255, 255, 0.07);
+                border: 2px solid rgba(255, 255, 255, 0.18);
+                color: #909090;
+                font-family: 'Press Start 2P', monospace;
+                font-size: 9px;
+                cursor: pointer;
+                user-select: none;
+                -webkit-user-select: none;
+                -webkit-tap-highlight-color: transparent;
+                touch-action: none;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: background 0.07s;
+            }
+
+            .menu-btn.pressed,
+            .menu-btn:active {
+                background: rgba(255, 255, 255, 0.22);
+                color: #fff;
+            }
         }
     </style>
 </head>
@@ -160,6 +195,7 @@
 
     <!-- Virtual controls — only rendered on mobile via CSS -->
     <div id="mobile-controls">
+        <div style="display:flex;width:100%;max-width:420px;justify-content:space-between;align-items:center;padding:4px 20px 8px;">
         <div id="dpad">
             <!-- row 1 -->
             <div class="dpad-empty"></div>
@@ -179,6 +215,11 @@
             <div class="action-btn" id="btn-a">A</div>
             <div class="action-btn" id="btn-b">B</div>
         </div>
+        </div><!-- end dpad+action row -->
+        <div id="menu-btns">
+            <div class="menu-btn" id="btn-codex">CODEX</div>
+            <div class="menu-btn" id="btn-map">MAP</div>
+        </div>
     </div>
 
     <script src="game.js"></script>
@@ -195,6 +236,8 @@
                 'btn-right': 'ArrowRight',
                 'btn-a':     ' ',   // Space = confirm / advance dialogue
                 'btn-b':     'z',   // Z = secondary confirm (used in battles)
+                'btn-codex': 'c',   // Open codex overlay
+                'btn-map':   'm',   // Open Ethiopia map
             };
 
             function press(key)   { if (typeof keys !== 'undefined') keys[key] = true;  }
